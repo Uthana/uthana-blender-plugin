@@ -1,0 +1,50 @@
+[tool.poetry]
+name = "uthana-blender-plugin"
+version = "1.0.0"
+description = "Uthana Blender add-on development environment"
+authors = ["Uthana, Inc."]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.12"
+requests = "^2.32.0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.12.0"
+mypy = "^1.11.0"
+pre-commit = "^3.8.0"
+fake-bpy-module-4-0 = "^20250130"
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "scripts"]
+exclude = [".venv", "dist", "build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "scripts"]
+warn_unused_configs = true
+warn_return_any = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+ignore_missing_imports = false
+pretty = true
+
+[[tool.mypy.overrides]]
+module = [
+  "bpy",
+  "bpy.*",
+]
+ignore_missing_imports = true
