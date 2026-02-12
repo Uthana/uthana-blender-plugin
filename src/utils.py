@@ -5,6 +5,18 @@ import bpy
 from .logger import logger
 
 
+def validate_blender_context():
+    """Check that the Blender context is valid for operations.
+
+    Returns:
+        bool: True if context has a valid scene and view layer
+    """
+    try:
+        return bpy.context.scene is not None and bpy.context.view_layer is not None
+    except (AttributeError, ReferenceError):
+        return False
+
+
 def get_selected_armatures():
     """Get all selected armatures except the active one.
 
@@ -75,14 +87,14 @@ def extract_animated_preview_frames(preview_path: str):
 
     # Check common locations where ffmpeg might be installed
     ffmpeg_paths = [
-        "ffmpeg",  # Try PATH first
-        "/opt/homebrew/bin/ffmpeg",  # Homebrew on Apple Silicon
-        "/usr/local/bin/ffmpeg",  # Homebrew on Intel Mac
+        'ffmpeg',  # Try PATH first
+        '/opt/homebrew/bin/ffmpeg',  # Homebrew on Apple Silicon
+        '/usr/local/bin/ffmpeg',  # Homebrew on Intel Mac
     ]
 
     for ffmpeg_cmd in ffmpeg_paths:
         try:
-            result = subprocess.run([ffmpeg_cmd, "-version"], capture_output=True, timeout=2)
+            result = subprocess.run([ffmpeg_cmd, '-version'], capture_output=True, timeout=2)
             if result.returncode == 0:
                 logger.info(f"ffmpeg found at: {ffmpeg_cmd}")
                 return _extract_frames_with_ffmpeg(preview_path, ffmpeg_cmd)
@@ -99,7 +111,7 @@ def extract_animated_preview_frames(preview_path: str):
     return [], []
 
 
-def _extract_frames_with_ffmpeg(preview_path: str, ffmpeg_cmd: str = "ffmpeg"):
+def _extract_frames_with_ffmpeg(preview_path: str, ffmpeg_cmd: str = 'ffmpeg'):
     """Extract animated preview frames using ffmpeg.
 
     Args:
@@ -124,7 +136,12 @@ def _extract_frames_with_ffmpeg(preview_path: str, ffmpeg_cmd: str = "ffmpeg"):
         output_pattern = os.path.join(temp_dir, "frame_%04d.png")
 
         # Extract frames using ffmpeg
-        cmd = [ffmpeg_cmd, "-i", preview_path, "-vsync", "0", output_pattern]
+        cmd = [
+            ffmpeg_cmd,
+            '-i', preview_path,
+            '-vsync', '0',
+            output_pattern
+        ]
 
         result = subprocess.run(cmd, capture_output=True, timeout=30)
         if result.returncode != 0:
@@ -132,7 +149,7 @@ def _extract_frames_with_ffmpeg(preview_path: str, ffmpeg_cmd: str = "ffmpeg"):
             return [], []
 
         # Load each frame
-        frame_files = sorted([f for f in os.listdir(temp_dir) if f.startswith("frame_")])
+        frame_files = sorted([f for f in os.listdir(temp_dir) if f.startswith('frame_')])
         logger.info(f"Extracted {len(frame_files)} frames with ffmpeg")
 
         for idx, frame_file in enumerate(frame_files):
