@@ -164,6 +164,118 @@ def download_motion_file(request: DownloadRequest) -> OperationResult:
         )
 
 
+def download_preview_image(
+    domain: str, character_id: str, motion_id: str, api_key: str
+) -> OperationResult:
+    """Downloads motion preview image (does not charge download seconds).
+
+    Args:
+        domain: API domain
+        character_id: Character ID
+        motion_id: Motion ID
+        api_key: API key for authentication
+
+    Returns:
+        OperationResult with file_path to the preview WebM
+    """
+    try:
+        preview_url = f"https://{domain}/app/preview/{character_id}/{motion_id}/preview.webm"
+        headers = create_download_headers(api_key)
+
+        logger.info("Downloading preview image: %s", preview_url)
+        response = requests.get(preview_url, headers=headers, timeout=30)
+        response.raise_for_status()
+
+        # Save preview image
+        filename = f"preview_{character_id}_{motion_id}.webm"
+        output_path = str(CACHE_DIR / filename)
+
+        with open(output_path, "wb") as f:
+            f.write(response.content)
+
+        logger.info("Preview image saved to: %s", output_path)
+
+        return OperationResult(
+            success=True,
+            message="Preview image downloaded",
+            data={"file_path": output_path, "filename": filename},
+        )
+
+    except requests.exceptions.RequestException as e:
+        return OperationResult(
+            success=False,
+            message=f"Preview download failed: {str(e)}",
+            error_code="PREVIEW_DOWNLOAD_ERROR",
+        )
+    except Exception as e:
+        return OperationResult(
+            success=False, message=f"Preview download error: {str(e)}", error_code="UNKNOWN_ERROR"
+        )
+
+
+def download_preview_video(
+    domain: str, character_id: str, motion_id: str, api_key: str
+) -> OperationResult:
+    """Downloads motion preview animation (WebM) directly from API.
+
+    Args:
+        domain: API domain
+        character_id: Character ID
+        motion_id: Motion ID
+        api_key: API key for authentication
+
+    Returns:
+        OperationResult with file_path to the preview animation
+    """
+    try:
+        preview_url = f"https://{domain}/app/preview/{character_id}/{motion_id}/preview.webm"
+        headers = create_download_headers(api_key)
+
+        logger.info("Downloading preview: %s", preview_url)
+        response = requests.get(preview_url, headers=headers, timeout=60)
+        response.raise_for_status()
+
+        # Determine file extension from content-type or default to gif
+        content_type = response.headers.get("content-type", "")
+        if "image/gif" in content_type:
+            ext = "gif"
+        elif "video/webm" in content_type:
+            ext = "webm"
+        elif "video/mp4" in content_type:
+            ext = "mp4"
+        elif "image/apng" in content_type or "image/png" in content_type:
+            ext = "png"
+        else:
+            ext = "gif"  # Default to gif
+
+        filename = f"preview_{character_id}_{motion_id}.{ext}"
+        output_path = str(CACHE_DIR / filename)
+
+        with open(output_path, "wb") as f:
+            f.write(response.content)
+
+        logger.info("Preview video saved to: %s", output_path)
+
+        return OperationResult(
+            success=True,
+            message="Preview video downloaded",
+            data={"file_path": output_path, "filename": filename, "format": ext},
+        )
+
+    except requests.exceptions.RequestException as e:
+        return OperationResult(
+            success=False,
+            message=f"Preview video download failed: {str(e)}",
+            error_code="PREVIEW_VIDEO_DOWNLOAD_ERROR",
+        )
+    except Exception as e:
+        return OperationResult(
+            success=False,
+            message=f"Preview video download error: {str(e)}",
+            error_code="UNKNOWN_ERROR",
+        )
+
+
 def list_motions(api_key: str, domain: str) -> OperationResult:
     """List all motions for the authenticated user."""
     query = """
@@ -172,11 +284,6 @@ def list_motions(api_key: str, domain: str) -> OperationResult:
             id
             name
             created
-            updated
-            tags
-            favorite {
-                id
-            }
         }
     }
     """
@@ -185,10 +292,10 @@ def list_motions(api_key: str, domain: str) -> OperationResult:
     result = make_graphql_request(url, api_key, query)
 
     if result.success and result.data:
-        # Process motions to add is_favorite boolean
+        # Process motions
         motions = result.data.get("motions", [])
         for motion in motions:
-            motion["is_favorite"] = motion.get("favorite") is not None
+            motion["is_favorite"] = False  # Default to false since we're not fetching this
         return OperationResult(
             success=True,
             message="Motions fetched successfully",

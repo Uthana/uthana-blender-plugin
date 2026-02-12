@@ -118,6 +118,38 @@ class UthanaProperties(bpy.types.PropertyGroup):
         default="",
     )
 
+    # Pending Motion Preview (for confirmation before download)
+    pending_motion_id: StringProperty(
+        name="Pending Motion ID",
+        description="Motion ID waiting for preview confirmation",
+        default="",
+    )
+
+    pending_motion_name: StringProperty(
+        name="Pending Motion Name",
+        description="Name of motion waiting for preview",
+        default="",
+    )
+
+    pending_character_id: StringProperty(
+        name="Pending Character ID",
+        description="Character ID for pending motion",
+        default="",
+    )
+
+    pending_preview_image_path: StringProperty(
+        name="Preview Image Path",
+        description="Path to downloaded preview image",
+        default="",
+        subtype="FILE_PATH",
+    )
+
+    pending_motion_source: StringProperty(
+        name="Pending Motion Source",
+        description="Source workflow that generated this pending motion (text or video)",
+        default="",
+    )
+
     # Character Upload
     character_file_path: StringProperty(
         name="Character File",
@@ -246,6 +278,26 @@ class UthanaProperties(bpy.types.PropertyGroup):
         name="Result Motion ID",
         description="Motion ID from last motion ID stitching",
         default="",
+    )
+
+    # Preview Animation State
+    preview_frames_loaded: BoolProperty(
+        name="Preview Frames Loaded",
+        description="Whether preview animation frames are loaded",
+        default=False,
+    )
+
+    preview_current_frame_idx: IntProperty(
+        name="Current Preview Frame",
+        description="Current frame index in preview animation",
+        default=0,
+    )
+
+    pending_preview_video_path: StringProperty(
+        name="Preview Video Path",
+        description="Path to downloaded preview animation (PNG/APNG/GIF)",
+        default="",
+        subtype="FILE_PATH",
     )
 
     # UI Section Toggles

@@ -11,7 +11,7 @@ import bpy
 
 from .. import assets, client, motion
 from ..constants import TAR_CHARACTER_ID
-from ..jobs import JobManager, JobStatus
+from ..jobs import JobManager, JobStatus, PendingJob
 from ..logger import logger
 
 
@@ -87,6 +87,7 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
                     # Get motion ID from result
                     job_result = result.data.get("result", {})
                     motion_id = None
+                    motion_name = props.video_motion_name or "Video Motion"
 
                     if isinstance(job_result, dict):
                         motion_id = job_result.get("motion", {}).get("id")
@@ -96,10 +97,27 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
                     if motion_id:
                         props.video_result_motion_id = motion_id
                         props.video_job_progress = 100
-                        self.report({"INFO"}, f"Motion created: {motion_id}")
 
-                        # Auto-download and import
-                        self.import_motion(context, motion_id)
+                        # Get character ID
+                        char_id = props.character_id or TAR_CHARACTER_ID
+
+                        # Store pending motion for preview
+                        props.pending_motion_id = motion_id
+                        props.pending_motion_name = motion_name
+                        props.pending_character_id = char_id
+                        props.pending_motion_source = "video"
+
+                        # Reset preview state
+                        props.preview_frames_loaded = False
+                        props.preview_current_frame_idx = 0
+                        props.pending_preview_video_path = ""
+
+                        self.report(
+                            {"INFO"}, f"Motion '{motion_name}' created! Check preview in sidebar."
+                        )
+
+                        # Auto-start preview animation
+                        bpy.ops.uthana.play_motion_preview("INVOKE_DEFAULT")
 
                         # Refresh motions list
                         assets.AssetManager.instance().refresh_motions(
@@ -393,7 +411,9 @@ class UTHANA_OT_character_upload(bpy.types.Operator):
         if result.success:
             file_path = result.data.get("file_path")
             if file_path:
-                bpy.ops.import_scene.fbx(filepath=file_path)
+                # Import FBX with axis correction
+                bpy.ops.import_scene.fbx(filepath=file_path, axis_forward="-Z", axis_up="Y")
+
                 logger.info("Character imported: %s", character_id)
                 self.report({"INFO"}, "Character imported into scene")
         else:
@@ -461,7 +481,9 @@ class UTHANA_OT_download_character(bpy.types.Operator):
         if result.success:
             file_path = result.data.get("file_path")
             if file_path:
-                bpy.ops.import_scene.fbx(filepath=file_path)
+                # Import FBX with axis correction
+                bpy.ops.import_scene.fbx(filepath=file_path, axis_forward="-Z", axis_up="Y")
+
                 self.report({"INFO"}, f"Character imported: {selected_char.name}")
                 return {"FINISHED"}
 

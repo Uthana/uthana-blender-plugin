@@ -3,6 +3,7 @@
 import bpy
 
 from .. import config, utils
+from ..logger import logger
 
 
 class UTHANA_PT_main(bpy.types.Panel):
@@ -284,6 +285,99 @@ class UTHANA_PT_text_to_motion(bpy.types.Panel):
             col.prop(props, "generate_result_motion_id", text="")
 
 
+class UTHANA_PT_text_to_motion_preview(bpy.types.Panel):
+    """Preview panel for text-to-motion results."""
+
+    bl_idname = "UTHANA_PT_text_to_motion_preview"
+    bl_label = "Motion Preview"
+    bl_parent_id = "UTHANA_PT_text_to_motion"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+
+    @classmethod
+    def poll(cls, context):
+        """Only show when there's a pending motion from text-to-motion."""
+        props = context.scene.uthana_props
+        return props.pending_motion_id != "" and props.pending_motion_source == "text"
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.uthana_props
+
+        # Motion info
+        box = layout.box()
+        box.label(text=f"Motion: {props.pending_motion_name}", icon="ANIM")
+        box.label(text=f"ID: {props.pending_motion_id}")
+
+        layout.separator()
+
+        # Animated preview display
+        if props.preview_frames_loaded:
+            preview_box = layout.box()
+            preview_box.label(text="Preview Animation:", icon="FILE_MOVIE")
+
+            # Display current frame
+            frame_idx = props.preview_current_frame_idx
+            img_name = f"preview_frame_{frame_idx}"
+
+            if img_name in bpy.data.images:
+                img = bpy.data.images[img_name]
+
+                # Ensure preview exists and is up to date
+                # (Images are already packed during extraction)
+                img.preview_ensure()
+
+                # Display using the image's preview
+                col = preview_box.column(align=True)
+
+                # Use template_icon with larger scale
+                if img.preview and img.preview.icon_id:
+                    col.template_icon(icon_value=img.preview.icon_id, scale=10.0)
+                else:
+                    # Fallback: show image info
+                    col.label(text=f"Frame {frame_idx + 1}")
+                    col.label(text=f"Resolution: {img.size[0]}x{img.size[1]}")
+
+                # Frame counter
+                row = preview_box.row()
+                row.scale_y = 0.8
+                row.label(text=f"Frame {frame_idx + 1}", icon="PLAY")
+            else:
+                preview_box.label(text="Loading frames...", icon="TIME")
+        else:
+            # No animated preview - show ffmpeg installation message
+            preview_box = layout.box()
+            preview_box.label(text="Animated preview requires ffmpeg", icon="INFO")
+            preview_box.label(text="Install: brew install ffmpeg (macOS)")
+            preview_box.label(text="Or use browser button below to view")
+
+        layout.separator()
+
+        # Warning about download cost
+        warning_box = layout.box()
+        warning_box.label(text="Downloading will charge your account", icon="INFO")
+        if props.download_secs_remaining > 0:
+            warning_box.label(text=f"Remaining quota: {props.download_secs_remaining:.1f}s")
+
+        # Action buttons
+        layout.separator()
+        row = layout.row(align=True)
+        row.scale_y = 2.0
+        row.operator(
+            "uthana.open_preview_browser", text="View Full Animation in Browser (FREE)", icon="PLAY"
+        )
+
+        layout.separator()
+        row = layout.row(align=True)
+        row.scale_y = 1.5
+        row.operator(
+            "uthana.download_pending_motion", text="Download & Import (Uses Quota)", icon="IMPORT"
+        )
+
+        row = layout.row(align=True)
+        row.operator("uthana.cancel_pending_motion", text="Cancel", icon="CANCEL")
+
+
 class UTHANA_PT_video_to_motion(bpy.types.Panel):
     """Video to Motion subpanel."""
 
@@ -316,6 +410,99 @@ class UTHANA_PT_video_to_motion(bpy.types.Panel):
             col.separator()
             col.label(text="Result Motion ID:")
             col.prop(props, "video_result_motion_id", text="")
+
+
+class UTHANA_PT_video_to_motion_preview(bpy.types.Panel):
+    """Preview panel for video-to-motion results."""
+
+    bl_idname = "UTHANA_PT_video_to_motion_preview"
+    bl_label = "Motion Preview"
+    bl_parent_id = "UTHANA_PT_video_to_motion"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+
+    @classmethod
+    def poll(cls, context):
+        """Only show when there's a pending motion from video-to-motion."""
+        props = context.scene.uthana_props
+        return props.pending_motion_id != "" and props.pending_motion_source == "video"
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.uthana_props
+
+        # Motion info
+        box = layout.box()
+        box.label(text=f"Motion: {props.pending_motion_name}", icon="ANIM")
+        box.label(text=f"ID: {props.pending_motion_id}")
+
+        layout.separator()
+
+        # Animated preview display
+        if props.preview_frames_loaded:
+            preview_box = layout.box()
+            preview_box.label(text="Preview Animation:", icon="FILE_MOVIE")
+
+            # Display current frame
+            frame_idx = props.preview_current_frame_idx
+            img_name = f"preview_frame_{frame_idx}"
+
+            if img_name in bpy.data.images:
+                img = bpy.data.images[img_name]
+
+                # Ensure preview exists and is up to date
+                # (Images are already packed during extraction)
+                img.preview_ensure()
+
+                # Display using the image's preview
+                col = preview_box.column(align=True)
+
+                # Use template_icon with larger scale
+                if img.preview and img.preview.icon_id:
+                    col.template_icon(icon_value=img.preview.icon_id, scale=10.0)
+                else:
+                    # Fallback: show image info
+                    col.label(text=f"Frame {frame_idx + 1}")
+                    col.label(text=f"Resolution: {img.size[0]}x{img.size[1]}")
+
+                # Frame counter
+                row = preview_box.row()
+                row.scale_y = 0.8
+                row.label(text=f"Frame {frame_idx + 1}", icon="PLAY")
+            else:
+                preview_box.label(text="Loading frames...", icon="TIME")
+        else:
+            # No animated preview - show ffmpeg installation message
+            preview_box = layout.box()
+            preview_box.label(text="Animated preview requires ffmpeg", icon="INFO")
+            preview_box.label(text="Install: brew install ffmpeg (macOS)")
+            preview_box.label(text="Or use browser button below to view")
+
+        layout.separator()
+
+        # Warning about download cost
+        warning_box = layout.box()
+        warning_box.label(text="Downloading will charge your account", icon="INFO")
+        if props.download_secs_remaining > 0:
+            warning_box.label(text=f"Remaining quota: {props.download_secs_remaining:.1f}s")
+
+        # Action buttons
+        layout.separator()
+        row = layout.row(align=True)
+        row.scale_y = 2.0
+        row.operator(
+            "uthana.open_preview_browser", text="View Full Animation in Browser (FREE)", icon="PLAY"
+        )
+
+        layout.separator()
+        row = layout.row(align=True)
+        row.scale_y = 1.5
+        row.operator(
+            "uthana.download_pending_motion", text="Download & Import (Uses Quota)", icon="IMPORT"
+        )
+
+        row = layout.row(align=True)
+        row.operator("uthana.cancel_pending_motion", text="Cancel", icon="CANCEL")
 
 
 class UTHANA_PT_character_upload(bpy.types.Panel):
@@ -552,10 +739,25 @@ classes = (
     UTHANA_PT_favorites,
     UTHANA_PT_characters,
     UTHANA_PT_text_to_motion,
+    UTHANA_PT_text_to_motion_preview,
     UTHANA_PT_video_to_motion,
+    UTHANA_PT_video_to_motion_preview,
     UTHANA_PT_character_upload,
-    UTHANA_PT_load_motion,
-    UTHANA_PT_bake,
-    UTHANA_PT_stitch_armatures,
-    UTHANA_PT_stitch_motion_ids,
+    # Deprecated panels - kept for future reference
+    # UTHANA_PT_load_motion,
+    # UTHANA_PT_bake,
+    # UTHANA_PT_stitch_armatures,
+    # UTHANA_PT_stitch_motion_ids,
 )
+
+
+def register():
+    """Register panels."""
+    for cls in classes:
+        bpy.utils.register_class(cls)
+
+
+def unregister():
+    """Unregister panels."""
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)

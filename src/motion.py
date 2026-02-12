@@ -117,7 +117,8 @@ def import_fbx_to_blender(fbx_path: str, motion_id: str = None) -> OperationResu
         images_before = set(bpy.data.images)
         collections_before = set(bpy.data.collections)
 
-        bpy.ops.import_scene.fbx(filepath=fbx_path)
+        # Import FBX with axis correction
+        bpy.ops.import_scene.fbx(filepath=fbx_path, axis_forward="-Z", axis_up="Y")
         logger.debug("FBX file imported: %s", fbx_path)
 
         # Rename imported objects with unique names (always add timestamp)

@@ -2,7 +2,8 @@
 
 import bpy
 
-from .. import config, motion
+from .. import client, config, motion
+from ..logger import logger
 
 
 class UTHANA_OT_generate_motion(bpy.types.Operator):
@@ -13,19 +14,51 @@ class UTHANA_OT_generate_motion(bpy.types.Operator):
     bl_description = "Generate motion from text prompt"
 
     def execute(self, context):
+        from .. import client
+
         props = context.scene.uthana_props
         request = props.create_generate_motion_request()
-        result = motion.generate_motion(request)
 
-        if result.success:
-            motion_id = result.data.get("motion_id")
-            if motion_id:
-                props.generate_result_motion_id = motion_id
-            self.report({"INFO"}, result.message)
-            return {"FINISHED"}
-        else:
-            self.report({"ERROR"}, result.message)
+        # Create motion via API (don't download yet)
+        motion_request = motion.MotionRequest(
+            domain=request.domain,
+            api_key=request.api_key,
+            character_id=request.character_id,
+            prompt=request.prompt,
+        )
+
+        api_result = client.create_text_to_motion(motion_request)
+
+        if not api_result.success:
+            self.report({"ERROR"}, api_result.message)
             return {"CANCELLED"}
+
+        motion_id = api_result.data.get("motion_id")
+        motion_data = api_result.data.get("motion", {})
+        motion_name = motion_data.get("name", "Generated Motion")
+
+        if not motion_id:
+            self.report({"ERROR"}, "No motion ID returned")
+            return {"CANCELLED"}
+
+        # Store pending motion for preview
+        props.pending_motion_id = motion_id
+        props.pending_motion_name = motion_name
+        props.pending_character_id = request.character_id
+        props.pending_motion_source = "text"
+        props.generate_result_motion_id = motion_id
+
+        # Reset preview state
+        props.preview_frames_loaded = False
+        props.preview_current_frame_idx = 0
+        props.pending_preview_video_path = ""
+
+        self.report({"INFO"}, f"Motion '{motion_name}' generated! Check preview in sidebar.")
+
+        # Auto-start preview animation
+        bpy.ops.uthana.play_motion_preview("INVOKE_DEFAULT")
+
+        return {"FINISHED"}
 
 
 class UTHANA_OT_load_motion(bpy.types.Operator):
@@ -571,6 +604,448 @@ class UTHANA_OT_delete_motion(bpy.types.Operator):
             item.is_favorite = m.is_favorite
 
 
+class UTHANA_OT_download_pending_motion(bpy.types.Operator):
+    """Download and import the pending motion (charges download seconds)."""
+
+    bl_idname = "uthana.download_pending_motion"
+    bl_label = "Download & Import"
+    bl_description = (
+        "Download the motion and import into Blender (this will charge your download seconds)"
+    )
+
+    def execute(self, context):
+        props = context.scene.uthana_props
+
+        # Clear preview state to stop animation
+        props.preview_frames_loaded = False
+        props.preview_current_frame_idx = 0
+        props.pending_preview_video_path = ""
+
+        # Check if there's a pending motion
+        if not props.pending_motion_id:
+            self.report({"ERROR"}, "No pending motion to download")
+            return {"CANCELLED"}
+
+        # Get character ID
+        character_id = props.pending_character_id or props.character_id
+
+        if not character_id:
+            self.report({"ERROR"}, "Character ID is required")
+            return {"CANCELLED"}
+
+        # Download and import
+        result = motion.download_and_import_motion(
+            props.domain, props.api_key, character_id, props.pending_motion_id
+        )
+
+        if result.success:
+            self.report({"INFO"}, "Motion downloaded and imported successfully!")
+
+            # Clear pending motion
+            props.pending_motion_id = ""
+            props.pending_motion_name = ""
+            props.pending_character_id = ""
+            props.pending_motion_source = ""
+            props.pending_preview_image_path = ""
+
+            return {"FINISHED"}
+        else:
+            self.report({"ERROR"}, f"Download failed: {result.message}")
+            return {"CANCELLED"}
+
+
+class UTHANA_OT_cancel_pending_motion(bpy.types.Operator):
+    """Cancel the pending motion preview."""
+
+    bl_idname = "uthana.cancel_pending_motion"
+    bl_label = "Cancel"
+    bl_description = "Cancel and don't download this motion"
+
+    def execute(self, context):
+        props = context.scene.uthana_props
+
+        # Clear preview state to stop animation
+        props.preview_frames_loaded = False
+        props.preview_current_frame_idx = 0
+        props.pending_preview_video_path = ""
+
+        # Clear pending motion
+        props.pending_motion_id = ""
+        props.pending_motion_name = ""
+        props.pending_character_id = ""
+        props.pending_motion_source = ""
+        props.pending_preview_image_path = ""
+
+        self.report({"INFO"}, "Cancelled")
+        return {"FINISHED"}
+
+
+class UTHANA_OT_open_preview_browser(bpy.types.Operator):
+    """Open motion preview animation in browser."""
+
+    bl_idname = "uthana.open_preview_browser"
+    bl_label = "View Preview"
+    bl_description = "Open the motion preview animation in your web browser"
+
+    def execute(self, context):
+        from .. import utils
+
+        props = context.scene.uthana_props
+
+        # Check if there's a pending motion to preview
+        if not props.pending_motion_id:
+            self.report({"ERROR"}, "No motion available for preview")
+            return {"CANCELLED"}
+
+        # Build web viewer URL
+        character_id = props.pending_character_id or props.character_id
+        url = utils.build_web_viewer_url(props.domain, character_id, props.pending_motion_id)
+
+        # Open in default browser
+        import webbrowser
+
+        webbrowser.open(url)
+
+        self.report({"INFO"}, "Opening preview in browser...")
+        return {"FINISHED"}
+
+
+class UTHANA_OT_open_web_viewer(bpy.types.Operator):
+    """Open motion in web browser for preview."""
+
+    bl_idname = "uthana.open_web_viewer"
+    bl_label = "View in Browser"
+    bl_description = "Open the motion in your web browser (you need to be logged in)"
+
+    def execute(self, context):
+        from .. import utils
+
+        props = context.scene.uthana_props
+
+        # Check if there's a pending motion to preview
+        if not props.pending_motion_id:
+            self.report({"ERROR"}, "No motion available for preview")
+            return {"CANCELLED"}
+
+        # Build web viewer URL
+        character_id = props.pending_character_id or props.character_id
+        url = utils.build_web_viewer_url(props.domain, character_id, props.pending_motion_id)
+
+        # Open in default browser
+        import webbrowser
+
+        webbrowser.open(url)
+
+        self.report({"INFO"}, "Opening web viewer...")
+        return {"FINISHED"}
+
+
+class UTHANA_OT_show_motion_preview_popup(bpy.types.Operator):
+    """Show motion preview in a popup dialog."""
+
+    bl_idname = "uthana.show_motion_preview_popup"
+    bl_label = "Motion Preview"
+    bl_description = "Preview the generated motion before downloading"
+    bl_options = {"REGISTER", "INTERNAL"}
+
+    preview_video_path: bpy.props.StringProperty(default="")
+    preview_video_format: bpy.props.StringProperty(default="")
+    preview_download_failed: bpy.props.BoolProperty(default=False)
+    preview_download_message: bpy.props.StringProperty(default="")
+
+    def invoke(self, context, event):
+        props = context.scene.uthana_props
+
+        # Download preview animation (PNG/APNG)
+        self.preview_download_failed = False
+        self.preview_download_message = "Downloading preview..."
+
+        result = client.download_preview_video(
+            props.domain, props.pending_character_id, props.pending_motion_id, props.api_key
+        )
+
+        if result.success:
+            self.preview_video_path = result.data.get("file_path", "")
+            self.preview_video_format = result.data.get("format", "")
+            logger.info(f"Preview downloaded: {self.preview_video_path}")
+
+            # Load preview animation as Blender image (static first frame)
+            try:
+                # Check if image already exists
+                img_name = f"preview_{props.pending_motion_id}"
+                if img_name in bpy.data.images:
+                    bpy.data.images.remove(bpy.data.images[img_name])
+
+                # Load the preview (will show first frame only - stable approach)
+                img = bpy.data.images.load(self.preview_video_path)
+                img.name = img_name
+
+                # Pack the image so it's accessible
+                img.pack()
+
+                logger.info(f"Preview image loaded: {img_name}")
+
+            except Exception as e:
+                logger.error(f"Failed to load preview as image: {e}")
+                self.preview_download_failed = True
+                self.preview_download_message = f"Preview loaded but display failed: {str(e)}"
+        else:
+            self.preview_download_failed = True
+            self.preview_download_message = result.message
+            logger.warning(f"Preview download failed: {result.message}")
+
+        return context.window_manager.invoke_props_dialog(self, width=600)
+
+    def draw(self, context):
+        from ..logger import logger
+
+        layout = self.layout
+        props = context.scene.uthana_props
+
+        # Motion info
+        col = layout.column(align=True)
+        col.label(text=f"Motion: {props.pending_motion_name}", icon="ANIM")
+        col.label(text=f"ID: {props.pending_motion_id}")
+
+        layout.separator()
+
+        # Preview video display
+        if self.preview_video_path and not self.preview_download_failed:
+            box = layout.box()
+            box.label(text="Preview Animation:", icon="FILE_MOVIE")
+
+            # Display the preview animation
+            img_name = f"preview_{props.pending_motion_id}"
+            if img_name in bpy.data.images:
+                img = bpy.data.images[img_name]
+
+                # Display static preview image
+                col = box.column(align=True)
+
+                # Use template_preview for simple, stable image display
+                try:
+                    col.template_preview(img, show_buttons=False)
+                except Exception as e:
+                    # Fallback: just show dimensions
+                    logger.warning(f"template_preview failed: {e}")
+                    col.label(text=f"Preview: {img.size[0]}x{img.size[1]}px", icon="IMAGE_DATA")
+
+                # Info about the preview
+                row = box.row()
+                row.scale_y = 0.8
+                row.label(text="First frame - Full animation available in browser", icon="INFO")
+        elif self.preview_download_failed:
+            box = layout.box()
+            box.label(text=self.preview_download_message, icon="ERROR")
+            box.label(text="You can still view in browser or download directly", icon="INFO")
+
+        layout.separator()
+
+        # Warning about download cost
+        box = layout.box()
+        box.label(text="Downloading will charge your account", icon="INFO")
+        if props.download_secs_remaining > 0:
+            box.label(text=f"Remaining quota: {props.download_secs_remaining:.1f}s")
+
+        layout.separator()
+
+        # Buttons - emphasize browser preview for full animation
+        layout.separator()
+        row = layout.row(align=True)
+        row.scale_y = 2.0
+        row.operator(
+            "uthana.open_preview_browser", text="View Full Animation in Browser (FREE)", icon="PLAY"
+        )
+
+        layout.separator()
+        row = layout.row(align=True)
+        row.scale_y = 1.5
+        row.operator(
+            "uthana.download_pending_motion", text="Download & Import (Uses Quota)", icon="IMPORT"
+        )
+
+        row = layout.row(align=True)
+        row.operator("uthana.cancel_pending_motion", text="Cancel", icon="CANCEL")
+
+    def execute(self, context):
+        """Clean up when popup is closed."""
+        # Clean up preview image
+        props = context.scene.uthana_props
+        img_name = f"preview_{props.pending_motion_id}"
+        if img_name in bpy.data.images:
+            bpy.data.images.remove(bpy.data.images[img_name])
+
+        return {"FINISHED"}
+
+
+class UTHANA_OT_play_motion_preview(bpy.types.Operator):
+    """Play animated motion preview using timer-based frame cycling."""
+
+    bl_idname = "uthana.play_motion_preview"
+    bl_label = "Play Motion Preview"
+    bl_options = {"REGISTER", "INTERNAL"}
+
+    _timer = None
+    _frames = []
+    _frame_durations = []
+    _current_frame_idx: int = 0
+    _time_elapsed: float = 0.0
+    _cleanup_done: bool = False
+
+    def modal(self, context, event):
+        # Validate context is still valid
+        if not self._validate_context(context):
+            return self._safe_cleanup(context, error=True)
+
+        if event.type == "TIMER":
+            props = context.scene.uthana_props
+
+            # Check if cancelled externally
+            if not props.pending_motion_id:
+                return self._safe_cleanup(context)
+
+            # Verify frames still exist
+            if not self._frames or not all(self._frame_exists(f) for f in self._frames):
+                logger.error("Preview frames were deleted")
+                return self._safe_cleanup(context, error=True)
+
+            # Advance frame based on timing
+            frame_duration = self._frame_durations[self._current_frame_idx]
+            self._time_elapsed += 0.033  # Timer interval
+
+            if self._time_elapsed >= frame_duration:
+                self._time_elapsed = 0.0
+                self._current_frame_idx = (self._current_frame_idx + 1) % len(self._frames)
+                props.preview_current_frame_idx = self._current_frame_idx
+
+                # Ensure current frame's preview is generated
+                try:
+                    current_frame = self._frames[self._current_frame_idx]
+                    if current_frame and current_frame.name in bpy.data.images:
+                        # Force preview regeneration (images are already packed during extraction)
+                        current_frame.preview_ensure()
+                except Exception as e:
+                    logger.warning(f"Failed to update frame preview: {e}")
+
+                # Redraw safely
+                self._safe_redraw(context)
+
+        elif event.type == "ESC":
+            return self._safe_cleanup(context)
+
+        return {"PASS_THROUGH"}
+
+    def _validate_context(self, context):
+        """Check context is still valid."""
+        try:
+            return context.window and context.scene
+        except (AttributeError, ReferenceError):
+            return False
+
+    def _frame_exists(self, frame):
+        """Check if frame image still exists."""
+        try:
+            return frame and frame.name in bpy.data.images
+        except (AttributeError, ReferenceError):
+            return False
+
+    def _safe_redraw(self, context):
+        """Safely redraw UI."""
+        try:
+            if context.screen and context.screen.areas:
+                for area in context.screen.areas:
+                    if area.type == "VIEW_3D":
+                        area.tag_redraw()
+        except (AttributeError, ReferenceError):
+            pass
+
+    def _safe_cleanup(self, context, error=False):
+        """Clean up with error handling."""
+        if self._cleanup_done:
+            return {"CANCELLED"}
+
+        try:
+            # Remove timer
+            if self._timer and context and context.window_manager:
+                context.window_manager.event_timer_remove(self._timer)
+                self._timer = None
+
+            # Remove frames
+            for frame in self._frames:
+                try:
+                    if self._frame_exists(frame):
+                        bpy.data.images.remove(frame)
+                except Exception as e:
+                    logger.warning(f"Failed to remove frame: {e}")
+
+            self._frames.clear()
+            self._cleanup_done = True
+
+            # Clear properties
+            if context and context.scene:
+                props = context.scene.uthana_props
+                props.preview_frames_loaded = False
+                props.preview_current_frame_idx = 0
+
+            if context:
+                self._safe_redraw(context)
+
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")
+
+        return {"CANCELLED"}
+
+    def invoke(self, context, event):
+        from .. import client, utils
+
+        props = context.scene.uthana_props
+
+        # Reset state
+        self._current_frame_idx = 0
+        self._time_elapsed = 0.0
+        self._cleanup_done = False
+
+        # Download preview PNG/APNG if needed
+        if not props.pending_preview_video_path:
+            result = client.download_preview_video(
+                props.domain, props.pending_character_id, props.pending_motion_id, props.api_key
+            )
+
+            if not result.success:
+                self.report({"ERROR"}, f"Preview download failed: {result.message}")
+                return {"CANCELLED"}
+
+            props.pending_preview_video_path = result.data.get("file_path", "")
+
+        # Extract frames using ffmpeg
+        self._frames, self._frame_durations = utils.extract_animated_preview_frames(
+            props.pending_preview_video_path
+        )
+
+        if not self._frames:
+            # ffmpeg not available - animated preview cannot be extracted
+            # User can still use the browser button to view the animation
+            logger.warning("ffmpeg not found - animated preview unavailable")
+            self.report(
+                {"WARNING"},
+                "ffmpeg not installed - install ffmpeg to enable animated preview, or use browser button",
+            )
+            props.preview_frames_loaded = False
+            return {"CANCELLED"}
+
+        # Mark as loaded
+        props.preview_frames_loaded = True
+        props.preview_current_frame_idx = 0
+
+        # Start timer (30fps)
+        wm = context.window_manager
+        self._timer = wm.event_timer_add(0.033, window=context.window)
+        wm.modal_handler_add(self)
+
+        self.report({"INFO"}, f"Playing preview ({len(self._frames)} frames)")
+        return {"RUNNING_MODAL"}
+
+
 # Classes to register
 classes = (
     UTHANA_OT_generate_motion,
@@ -589,4 +1064,10 @@ classes = (
     UTHANA_OT_toggle_motion_favorite,
     UTHANA_OT_copy_motion_id,
     UTHANA_OT_delete_motion,
+    UTHANA_OT_download_pending_motion,
+    UTHANA_OT_cancel_pending_motion,
+    UTHANA_OT_open_preview_browser,
+    UTHANA_OT_open_web_viewer,
+    UTHANA_OT_show_motion_preview_popup,
+    UTHANA_OT_play_motion_preview,
 )
