@@ -1,0 +1,44 @@
+name: Release uthana-blender-plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate tag format and version sync
+        id: validate_release
+        run: python scripts/release.py check-tag --tag "${GITHUB_REF_NAME}" --github-output "${GITHUB_OUTPUT}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: python -m pip install --upgrade pip poetry
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      - name: Build add-on zip
+        env:
+          UTHANA_BUILD_VERSION_LABEL: ${{ steps.validate_release.outputs.version_label }}
+        run: make build-zip
+
+      - name: Publish GitHub release with built zip
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
+          prerelease: ${{ steps.validate_release.outputs.is_prerelease == 'true' }}

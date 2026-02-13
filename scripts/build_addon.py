@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import ast
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +19,7 @@ PYPROJECT_FILE = ROOT_DIR / "pyproject.toml"
 BUILD_DIR = ROOT_DIR / "build" / "addon_stage"
 DIST_DIR = ROOT_DIR / "dist"
 ADDON_MODULE_NAME = "uthana"
+VERSION_LABEL_PATTERN = r"^\d+\.\d+\.\d+(?:-rc\.\d+)?$"
 
 
 def read_bl_info_version(init_file: Path) -> str:
@@ -77,18 +80,37 @@ def create_zip(stage_root: Path, version: str) -> Path:
     return archive_path
 
 
+def resolve_version_label(base_version: str) -> str:
+    version_label = os.getenv("UTHANA_BUILD_VERSION_LABEL", base_version).strip()
+    if not version_label:
+        raise ValueError("UTHANA_BUILD_VERSION_LABEL cannot be empty")
+    if not re.fullmatch(VERSION_LABEL_PATTERN, version_label):
+        raise ValueError(
+            "Version label must match MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-rc.N "
+            f"(received: {version_label!r})"
+        )
+    version_base = version_label.split("-", maxsplit=1)[0]
+    if version_base != base_version:
+        raise ValueError(
+            "Version label base must match bl_info version "
+            f"(bl_info={base_version}, label={version_label})"
+        )
+    return version_label
+
+
 def main() -> None:
     if not SRC_DIR.exists():
         raise FileNotFoundError(f"Missing source directory: {SRC_DIR}")
 
     version = read_bl_info_version(SRC_DIR / "__init__.py")
+    version_label = resolve_version_label(version)
     runtime_packages = read_runtime_packages(PYPROJECT_FILE)
 
     addon_stage_root = BUILD_DIR / ADDON_MODULE_NAME
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     stage_addon_source(addon_stage_root)
     vendor_dependencies(addon_stage_root, runtime_packages)
-    archive_path = create_zip(addon_stage_root, version)
+    archive_path = create_zip(addon_stage_root, version_label)
 
     print(f"Built add-on zip: {archive_path}")
     print(f"Vendored dependencies: {', '.join(runtime_packages) if runtime_packages else '(none)'}")

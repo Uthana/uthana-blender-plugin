@@ -1,27 +1,89 @@
-# uthana-blender-plugin
+# Uthana Blender Plugin
 
-Use Uthana foundation models from within Blender. Generate and refine lifelike human motion without leaving your animation workflow.
+Use Uthana foundation models directly in Blender to generate, preview, and apply lifelike human motion without leaving your animation workflow.
 
-## Development setup
+Latest release: https://github.com/Uthana/uthana-blender-plugin/releases/latest (v1.0.0)
 
-This repository uses Poetry for dependency and tooling management. The virtual environment is configured to live in the project at `.venv/`.
+## Features
+
+Use the built-in panel workflow in `View3D > Sidebar > Uthana` for easy access to all features:
+
+- Text to motion: generate motion from a natural-language prompt
+- Video to motion: extract motion from a video file
+- Browse and preview your Uthana motions directly in Blender
+- Download motions to your scene and apply them to your characters
+
+## Compatibility
+
+- Blender `4.0+`
+- Uthana account and API key (get it from https://uthana.com/app/account)
+- Requires an active internet connection while using the add-on
+
+## Installation
+
+### Option A: Install from GitHub Releases (recommended)
+
+1. Download the latest add-on zip from this repository's Releases page.
+2. In Blender, open `Edit > Preferences > Add-ons`.
+3. Click `Install...` and select the downloaded zip.
+4. Enable the add-on named `Uthana`.
+5. Open the `Uthana` tab in the 3D View sidebar (`N` key).
+
+### Option B: Build from source
+
+```sh
+git clone https://github.com/Uthana/uthana-blender-plugin.git
+cd uthana-blender-plugin
+poetry install --no-root
+make build-zip
+```
+
+Then install `dist/uthana-<version>.zip` from Blender Preferences.
+
+## Quick start
+
+1. Open Blender and go to `View3D > Sidebar > Uthana`.
+2. Expand `Config` and paste your API key (use the default domain `uthana.com`).
+3. Click the connection/test action in the UI to verify your API key is valid.
+4. Try one of the core workflows:
+   - **Text to motion**: write a prompt and generate a motion
+   - **Video to motion**: upload a video file and wait for processing
+   - **Load motion**: load a known motion ID onto a character
+5. Use the preview controls, then download/apply motion to your scene.
+
+## Contriuting and development setup
+
+This repository uses Poetry for dependency and tooling management. The virtual environment is configured at `.venv/`.
 
 ### Prerequisites
 
-- Python 3.11
-- Poetry
+- Python `3.11` (recommended to use [pyenv](https://github.com/pyenv/pyenv) for version management)
+- Poetry (https://python-poetry.org/docs/#installation)
 
-### Install
+### Contributing
+
+1. Create a branch for your change (`git checkout -b feature/my-feature`).
+2. When you have tested your changes, run `make format`, `make lint`, and `make typecheck`.
+3. Run `make precommit` to run the pre-commit hooks.
+4. Open a pull request with a clear description explaining the changes, and include any test notes.
+5. If you are fixing a bug form an existing GitHub issue, reference the issue in the pull request description.
+
+### Code of conduct
+
+1. We expect all contributors to follow the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/) code of conduct. Please be respectful and considerate of others when contributing to this project.
+2. Use of AI tools is allowed, but please be transparent about your use of AI tools in your pull request, and ensure that you have reviewed and understood the code you are contributing.
+
+## Development setup
+
+### Setup
 
 ```sh
 poetry install --no-root
 ```
 
-`--no-root` is intentional because this repository is a Blender add-on project, not a published Python package.
+`--no-root` is intentional because this project is a Blender add-on, not a published Python package.
 
-## Daily commands
-
-You can run tools directly with Poetry or use `make` shortcuts.
+### Common commands
 
 ```sh
 make lint
@@ -29,6 +91,8 @@ make format
 make typecheck
 make precommit-install
 make precommit
+make build-zip
+make release-prepare VERSION=1.2.3
 ```
 
 Equivalent Poetry commands:
@@ -38,20 +102,11 @@ poetry run ruff check src scripts
 poetry run ruff format src scripts
 poetry run mypy src scripts
 poetry run pre-commit run --all-files
+poetry run python scripts/build_addon.py
+poetry run python scripts/release.py prepare --version 1.2.3
 ```
 
-Recurring helper scripts:
-
-```sh
-./scripts/run_precommit.sh
-./scripts/build_release_zip.sh
-```
-
-## Format on save
-
-Workspace settings in `.vscode/settings.json` configure Ruff as the Python formatter and run lint fixes on save. This applies when using VS Code-compatible editors (including Cursor).
-
-## Pre-commit
+### Pre-commit hooks
 
 Install hooks once per clone:
 
@@ -59,24 +114,70 @@ Install hooks once per clone:
 make precommit-install
 ```
 
-Hooks run Ruff linting/formatting plus basic file hygiene checks.
+Hooks run Ruff linting/formatting and basic file hygiene checks.
 
-## Building a Blender add-on zip
+### CI build and release policy
 
-Use the build script to create a distributable zip:
+`dist/` artifacts are generated in CI and are not committed to the repository.
 
-```sh
-make build-zip
-```
+- Pull requests and pushes to `main` run the `Build uthana-blender-plugin` workflow, which executes `make build-zip` and uploads the built zip as a workflow artifact.
+- Tags matching `v*` run the `Release uthana-blender-plugin` workflow, which validates SemVer and version sync, builds the zip, and publishes it to a GitHub Release.
+- Enable branch protection on `main` and require the `Build uthana-blender-plugin` check before merging.
 
-This script:
+### Versioning and release tags
 
-- copies `src/` into a staged add-on module directory
-- vendors runtime dependencies (for example `requests`) into the bundle
-- writes `dist/uthana-<version>.zip` based on `bl_info["version"]`
+Releases follow SemVer with optional RC prereleases:
 
-Install that zip in Blender via Preferences -> Add-ons -> Install.
+- Stable: `vMAJOR.MINOR.PATCH` (example: `v1.2.3`)
+- Prerelease: `vMAJOR.MINOR.PATCH-rc.N` (example: `v1.2.3-rc.0`)
 
-## Packaging guidance
+`src/__init__.py` (`bl_info["version"]`) and `pyproject.toml` store the base version only (`MAJOR.MINOR.PATCH`). The RC suffix lives in the Git tag.
 
-For this repository, a Blender add-on zip is the primary release artifact. A PyPI package is not required unless you later decide to distribute shared SDK code separately from the add-on.
+Use this flow to create a release safely:
+
+1. Ensure your worktree is clean and you are on the branch you want to release from.
+2. Run:
+   - Stable: `make release-prepare VERSION=1.2.3`
+   - RC: `make release-prepare VERSION=1.2.3-rc.0`
+3. Push commit and tag: `git push origin <branch> --follow-tags`
+
+The helper script prevents tag reuse/clobber by checking existing local and remote tags before creating a new one.
+
+### Format on save
+
+If you are using VS Code or Cursor, the workspace settings in `.vscode/settings.json` automatically configure Ruff as the Python formatter and run lint fixes on save (including in Cursor/VS Code environments).
+
+## Repository layout
+
+- `src/`: Blender add-on source (registered as module `uthana` in release zips)
+- `src/ui/`: panels, operators, modal operators, and UI properties
+- `scripts/`: build and helper scripts
+- `dist/`: generated release artifacts
+
+## Troubleshooting
+
+- **Add-on not visible in Blender**: ensure it is enabled in Preferences and restart Blender.
+- **Auth/API failures**: verify API key and domain in the `Config` section.
+- **Video or character uploads fail**: confirm network access and supported file extensions.
+- **Type-check noise around `bpy`**: this repo uses `fake-bpy-module` for development typing support.
+
+## Contributing
+
+Contributions are welcome.
+
+1. Create a branch for your change.
+2. Run `make format`, `make lint`, and `make typecheck`.
+3. Run `make precommit`.
+4. Open a pull request with a clear description and test notes.
+
+For bugs and feature requests, open a GitHub issue.
+
+## Documentation and project support
+
+- API docs: https://uthana.com/docs/api
+- Issues: use this repository's GitHub issue tracker
+- Support: join the Uthana Discord: https://discord.gg/PbMzMPSyTG or email support (at) uthana.com
+
+## License
+
+Licensed under the Apache License 2.0. See `LICENSE`.
