@@ -756,7 +756,7 @@ class UTHANA_OT_show_motion_preview_popup(bpy.types.Operator):
     def invoke(self, context, event):
         props = context.scene.uthana_props
 
-        # Download preview animation (PNG/APNG)
+        # Download preview animation (WebM)
         self.preview_download_failed = False
         self.preview_download_message = "Downloading preview..."
 
@@ -891,11 +891,16 @@ class UTHANA_OT_play_motion_preview(bpy.types.Operator):
     _current_frame_idx: int = 0
     _time_elapsed: float = 0.0
     _cleanup_done: bool = False
+    _active_generation: int = 0  # Class-level: tracks which invoke is current
 
     def modal(self, context, event):
         # Validate context is still valid
         if not self._validate_context(context):
             return self._safe_cleanup(context, error=True)
+
+        # Check if superseded by a newer preview invocation
+        if self._generation != UTHANA_OT_play_motion_preview._active_generation:
+            return self._safe_cleanup(context, superseded=True)
 
         if event.type == "TIMER":
             props = context.scene.uthana_props
@@ -959,7 +964,7 @@ class UTHANA_OT_play_motion_preview(bpy.types.Operator):
         except (AttributeError, ReferenceError):
             pass
 
-    def _safe_cleanup(self, context, error=False):
+    def _safe_cleanup(self, context, error=False, superseded=False):
         """Clean up with error handling."""
         if self._cleanup_done:
             return {"CANCELLED"}
@@ -970,19 +975,21 @@ class UTHANA_OT_play_motion_preview(bpy.types.Operator):
                 context.window_manager.event_timer_remove(self._timer)
                 self._timer = None
 
-            # Remove frames
-            for frame in self._frames:
-                try:
-                    if self._frame_exists(frame):
-                        bpy.data.images.remove(frame)
-                except Exception as e:
-                    logger.warning(f"Failed to remove frame: {e}")
+            # Only remove frames if not superseded — a newer instance owns
+            # the frame names and would break if we deleted them
+            if not superseded:
+                for frame in self._frames:
+                    try:
+                        if self._frame_exists(frame):
+                            bpy.data.images.remove(frame)
+                    except Exception as e:
+                        logger.warning(f"Failed to remove frame: {e}")
 
             self._frames.clear()
             self._cleanup_done = True
 
-            # Clear properties
-            if context and context.scene:
+            # Clear properties only if not superseded (new instance sets its own)
+            if not superseded and context and context.scene:
                 props = context.scene.uthana_props
                 props.preview_frames_loaded = False
                 props.preview_current_frame_idx = 0
@@ -1000,12 +1007,16 @@ class UTHANA_OT_play_motion_preview(bpy.types.Operator):
 
         props = context.scene.uthana_props
 
+        # Claim the active generation so any previous modal knows to exit
+        UTHANA_OT_play_motion_preview._active_generation += 1
+        self._generation = UTHANA_OT_play_motion_preview._active_generation
+
         # Reset state
         self._current_frame_idx = 0
         self._time_elapsed = 0.0
         self._cleanup_done = False
 
-        # Download preview PNG/APNG if needed
+        # Download preview WebM if needed
         if not props.pending_preview_video_path:
             result = client.download_preview_video(
                 props.domain, props.pending_character_id, props.pending_motion_id, props.api_key

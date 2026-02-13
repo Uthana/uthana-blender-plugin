@@ -348,7 +348,7 @@ class UTHANA_PT_text_to_motion_preview(bpy.types.Panel):
             # No animated preview - show ffmpeg installation message
             preview_box = layout.box()
             preview_box.label(text="Animated preview requires ffmpeg", icon="INFO")
-            preview_box.label(text="Install: brew install ffmpeg (macOS)")
+            preview_box.label(text="Visit ffmpeg.org/download.html to install")
             preview_box.label(text="Or use browser button below to view")
 
         layout.separator()
@@ -475,7 +475,7 @@ class UTHANA_PT_video_to_motion_preview(bpy.types.Panel):
             # No animated preview - show ffmpeg installation message
             preview_box = layout.box()
             preview_box.label(text="Animated preview requires ffmpeg", icon="INFO")
-            preview_box.label(text="Install: brew install ffmpeg (macOS)")
+            preview_box.label(text="Visit ffmpeg.org/download.html to install")
             preview_box.label(text="Or use browser button below to view")
 
         layout.separator()

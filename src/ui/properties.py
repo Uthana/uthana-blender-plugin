@@ -295,7 +295,7 @@ class UthanaProperties(bpy.types.PropertyGroup):
 
     pending_preview_video_path: StringProperty(
         name="Preview Video Path",
-        description="Path to downloaded preview animation (PNG/APNG/GIF)",
+        description="Path to downloaded preview animation (WebM)",
         default="",
         subtype="FILE_PATH",
     )

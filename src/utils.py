@@ -85,33 +85,58 @@ def extract_animated_preview_frames(preview_path: str):
 
     logger.info(f"Starting animated preview extraction from: {preview_path}")
 
-    # Check common locations where ffmpeg might be installed
-    ffmpeg_paths = [
-        'ffmpeg',  # Try PATH first
-        '/opt/homebrew/bin/ffmpeg',  # Homebrew on Apple Silicon
-        '/usr/local/bin/ffmpeg',  # Homebrew on Intel Mac
-    ]
+    import platform
+    import shutil
 
-    for ffmpeg_cmd in ffmpeg_paths:
-        try:
-            result = subprocess.run([ffmpeg_cmd, '-version'], capture_output=True, timeout=2)
-            if result.returncode == 0:
-                logger.info(f"ffmpeg found at: {ffmpeg_cmd}")
-                return _extract_frames_with_ffmpeg(preview_path, ffmpeg_cmd)
-        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-            continue
+    # Try finding ffmpeg on PATH first (works on all platforms)
+    ffmpeg_cmd = shutil.which("ffmpeg")
+
+    # Fall back to common platform-specific install locations
+    if not ffmpeg_cmd:
+        system = platform.system()
+        fallback_paths = []
+        if system == "Darwin":
+            fallback_paths = [
+                "/opt/homebrew/bin/ffmpeg",  # Homebrew on Apple Silicon
+                "/usr/local/bin/ffmpeg",  # Homebrew on Intel Mac
+            ]
+        elif system == "Windows":
+            fallback_paths = [
+                os.path.expandvars(r"%ProgramFiles%\ffmpeg\bin\ffmpeg.exe"),
+                os.path.expandvars(r"%LocalAppData%\ffmpeg\bin\ffmpeg.exe"),
+                r"C:\ffmpeg\bin\ffmpeg.exe",
+            ]
+        else:  # Linux and others
+            fallback_paths = [
+                "/usr/bin/ffmpeg",
+                "/usr/local/bin/ffmpeg",
+                "/snap/bin/ffmpeg",
+            ]
+
+        for path in fallback_paths:
+            try:
+                result = subprocess.run([path, "-version"], capture_output=True, timeout=2)
+                if result.returncode == 0:
+                    ffmpeg_cmd = path
+                    break
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+                continue
+
+    if ffmpeg_cmd:
+        logger.info(f"ffmpeg found at: {ffmpeg_cmd}")
+        return _extract_frames_with_ffmpeg(preview_path, ffmpeg_cmd)
 
     logger.error("ffmpeg not found - cannot extract animated preview frames")
     logger.info("Install ffmpeg to enable in-Blender animated previews:")
-    logger.info("  macOS: brew install ffmpeg")
-    logger.info("  Windows: choco install ffmpeg (or download from ffmpeg.org)")
-    logger.info("  Linux: sudo apt install ffmpeg (or equivalent)")
+    logger.info("  macOS:   brew install ffmpeg")
+    logger.info("  Windows: winget install ffmpeg  (or download from ffmpeg.org)")
+    logger.info("  Linux:   sudo apt install ffmpeg  (or your distro's package manager)")
 
     # Return empty lists - caller will show message to install ffmpeg
     return [], []
 
 
-def _extract_frames_with_ffmpeg(preview_path: str, ffmpeg_cmd: str = 'ffmpeg'):
+def _extract_frames_with_ffmpeg(preview_path: str, ffmpeg_cmd: str = "ffmpeg"):
     """Extract animated preview frames using ffmpeg.
 
     Args:
@@ -135,12 +160,16 @@ def _extract_frames_with_ffmpeg(preview_path: str, ffmpeg_cmd: str = 'ffmpeg'):
         temp_dir = tempfile.mkdtemp(prefix="uthana_preview_")
         output_pattern = os.path.join(temp_dir, "frame_%04d.png")
 
-        # Extract frames using ffmpeg
+        # Extract frames using ffmpeg, upscaling to 384px wide for crisp preview
         cmd = [
             ffmpeg_cmd,
-            '-i', preview_path,
-            '-vsync', '0',
-            output_pattern
+            "-i",
+            preview_path,
+            "-vf",
+            "scale=384:-2:flags=lanczos",
+            "-vsync",
+            "0",
+            output_pattern,
         ]
 
         result = subprocess.run(cmd, capture_output=True, timeout=30)
@@ -149,7 +178,7 @@ def _extract_frames_with_ffmpeg(preview_path: str, ffmpeg_cmd: str = 'ffmpeg'):
             return [], []
 
         # Load each frame
-        frame_files = sorted([f for f in os.listdir(temp_dir) if f.startswith('frame_')])
+        frame_files = sorted([f for f in os.listdir(temp_dir) if f.startswith("frame_")])
         logger.info(f"Extracted {len(frame_files)} frames with ffmpeg")
 
         for idx, frame_file in enumerate(frame_files):

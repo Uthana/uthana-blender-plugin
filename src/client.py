@@ -235,20 +235,7 @@ def download_preview_video(
         response = requests.get(preview_url, headers=headers, timeout=60)
         response.raise_for_status()
 
-        # Determine file extension from content-type or default to gif
-        content_type = response.headers.get("content-type", "")
-        if "image/gif" in content_type:
-            ext = "gif"
-        elif "video/webm" in content_type:
-            ext = "webm"
-        elif "video/mp4" in content_type:
-            ext = "mp4"
-        elif "image/apng" in content_type or "image/png" in content_type:
-            ext = "png"
-        else:
-            ext = "gif"  # Default to gif
-
-        filename = f"preview_{character_id}_{motion_id}.{ext}"
+        filename = f"preview_{character_id}_{motion_id}.webm"
         output_path = str(CACHE_DIR / filename)
 
         with open(output_path, "wb") as f:
@@ -259,7 +246,7 @@ def download_preview_video(
         return OperationResult(
             success=True,
             message="Preview video downloaded",
-            data={"file_path": output_path, "filename": filename, "format": ext},
+            data={"file_path": output_path, "filename": filename, "format": "webm"},
         )
 
     except requests.exceptions.RequestException as e:
