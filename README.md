@@ -5,7 +5,7 @@
 
 ---
 
-Use Uthana foundation models directly in Blender to generate, preview, and apply lifelike human motion without leaving your animation workflow.
+Use Uthana's foundation models directly in Blender to generate, preview, and apply lifelike human motion without leaving your animation workflow.
 
 Latest release: https://github.com/Uthana/uthana-blender-plugin/releases/latest (v1.0.0)
 
