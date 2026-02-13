@@ -2,7 +2,7 @@
 bl_info = {
     "name": "Uthana",
     "author": "Uthana, Inc.",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Uthana",
     "description": "AI-powered motion generation plugin for Uthana: Text to Motion, Video to Motion, and more.",

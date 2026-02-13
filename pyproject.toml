@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "uthana-blender-plugin"
-version = "1.0.0"
+version = "1.0.1"
 description = "Uthana Blender add-on development environment"
 authors = ["Uthana, Inc."]
 readme = "README.md"
