@@ -1,4 +1,9 @@
-# Uthana Blender Plugin
+# Uthana Blender plugin
+
+<img height="48" alt="image" src="https://github.com/user-attachments/assets/cc4391c2-fa9c-4ad3-95d4-292b512d9007" /> <img width="48" height="48" alt="image" src="https://github.com/user-attachments/assets/5d0c7249-a40e-4c64-ad13-bf03edff7382" />
+ <img height="48" alt="image" src="https://github.com/user-attachments/assets/27c0e600-242f-4220-98df-07a8e0e7f1ef" />
+
+---
 
 Use Uthana foundation models directly in Blender to generate, preview, and apply lifelike human motion without leaving your animation workflow.
 
@@ -43,15 +48,29 @@ Then install `dist/uthana-<version>.zip` from Blender Preferences.
 ## Quick start
 
 1. Open Blender and go to `View3D > Sidebar > Uthana`.
-2. Expand `Config` and paste your API key (use the default domain `uthana.com`).
-3. Click the connection/test action in the UI to verify your API key is valid.
-4. Try one of the core workflows:
-   - **Text to motion**: write a prompt and generate a motion
-   - **Video to motion**: upload a video file and wait for processing
-   - **Load motion**: load a known motion ID onto a character
-5. Use the preview controls, then download/apply motion to your scene.
 
-## Contriuting and development setup
+2. Expand `Config` and paste your API key (use the default domain `uthana.com`).
+    <img width="473" height="270" alt="blender_configure" src="https://github.com/user-attachments/assets/c8150826-62bc-4cff-9673-7bfe5b3697fa" />
+
+3. Click the connection/test action in the UI to verify your API key is valid.
+
+4. (Optional) Upload a character mesh. Uthana will automatically rig and retarget your characters to every motion you generate.
+    <img width="476" height="376" alt="blender_charUpload" src="https://github.com/user-attachments/assets/176aeb69-3734-4e3c-b8f8-be691d424dc4" />
+
+5. Generate a motion:
+    
+    - **Text to motion** — write a prompt and generate a motion. For best results, describe a single motion, and begin your prompt with "A person..."
+  
+      <img width="521" height="372" alt="blender_t2m" src="https://github.com/user-attachments/assets/87925d25-3c79-4520-9ee4-c867489d2041" />
+
+    - **Video to motion** — upload a video file of yourself or someone else performing a motion, then wait for processing (can take 60+ seconds).
+  
+      <img width="471" height="333" alt="blender_v2m" src="https://github.com/user-attachments/assets/ee2def88-e42b-4b66-b289-85fd522ffba5" />
+
+6. Preview the motion in the viewer before downloading (you can also view all of your generated motions on <a href="https://uthana.com/app" target="_blank">uthana.com</a>). When you're ready to use a motion, click `Download and import` to add it to your scene.
+    <img width="519" height="645" alt="blender_preview_and_download" src="https://github.com/user-attachments/assets/ffcec04c-80c2-45f0-a457-069bc734a3fe" />
+
+## Contributing and development setup
 
 This repository uses Poetry for dependency and tooling management. The virtual environment is configured at `.venv/`.
 
