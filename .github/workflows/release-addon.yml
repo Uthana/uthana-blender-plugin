@@ -36,9 +36,12 @@ jobs:
           UTHANA_BUILD_VERSION_LABEL: ${{ steps.validate_release.outputs.version_label }}
         run: make build-zip
 
+      - name: Rename zip for stable download URL
+        run: mv dist/*.zip dist/uthana-blender-plugin.zip
+
       - name: Publish GitHub release with built zip
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          files: dist/uthana-blender-plugin.zip
           generate_release_notes: true
           prerelease: ${{ steps.validate_release.outputs.is_prerelease == 'true' }}
