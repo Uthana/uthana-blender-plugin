@@ -3,8 +3,7 @@ name: Build uthana-blender-plugin
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+  push: {}  # All branches (including PR branches) so required status checks are reported
   workflow_dispatch:
 
 permissions:
