@@ -3,7 +3,6 @@
 import bpy
 
 from .. import config, utils
-from ..logger import logger
 
 
 class UTHANA_PT_main(bpy.types.Panel):
@@ -34,12 +33,12 @@ class UTHANA_PT_main(bpy.types.Panel):
             if props.user_name:
                 row.label(text=f"Connected: {props.user_name}", icon="CHECKMARK")
             else:
-                row.label(text="API Key set", icon="KEY_HLT")
+                row.label(text="API key set", icon="KEY_HLT")
                 row.operator("uthana.test_connection", text="Test", icon="URL")
         else:
             box = layout.box()
             box.label(text="Not authenticated", icon="ERROR")
-            box.label(text="Set API Key in Config section")
+            box.label(text="Set API key in Config section")
 
 
 class UTHANA_PT_config(bpy.types.Panel):
@@ -57,7 +56,7 @@ class UTHANA_PT_config(bpy.types.Panel):
         props = context.scene.uthana_props
 
         col = layout.column(align=True)
-        col.label(text="API Key:")
+        col.label(text="API key:")
         col.prop(props, "api_key", text="")
         col.separator()
         col.label(text="Domain:")
@@ -85,7 +84,7 @@ class UTHANA_PT_account(bpy.types.Panel):
         props = context.scene.uthana_props
 
         if not props.api_key:
-            layout.label(text="Set API Key first", icon="INFO")
+            layout.label(text="Set API key first", icon="INFO")
             return
 
         col = layout.column()
@@ -114,7 +113,7 @@ class UTHANA_PT_motions(bpy.types.Panel):
         props = context.scene.uthana_props
 
         if not props.api_key:
-            layout.label(text="Set API Key first", icon="INFO")
+            layout.label(text="Set API key first", icon="INFO")
             return
 
         # Motion list with refresh button
@@ -167,7 +166,7 @@ class UTHANA_PT_favorites(bpy.types.Panel):
         props = context.scene.uthana_props
 
         if not props.api_key:
-            layout.label(text="Set API Key first", icon="INFO")
+            layout.label(text="Set API key first", icon="INFO")
             return
 
         # Count favorites
@@ -197,8 +196,7 @@ class UTHANA_PT_favorites(bpy.types.Panel):
             # Action buttons
             sub = row.row(align=True)
             sub.scale_x = 0.8
-            op = sub.operator("uthana.load_selected_motion", text="", icon="IMPORT")
-            # Set the motion index before loading
+            sub.operator("uthana.load_selected_motion", text="", icon="IMPORT")
             op_unfav = sub.operator("uthana.toggle_motion_favorite", text="", icon="X")
             op_unfav.motion_index = actual_idx
 
@@ -221,7 +219,7 @@ class UTHANA_PT_characters(bpy.types.Panel):
         props = context.scene.uthana_props
 
         if not props.api_key:
-            layout.label(text="Set API Key first", icon="INFO")
+            layout.label(text="Set API key first", icon="INFO")
             return
 
         # Character list with refresh button
@@ -255,7 +253,7 @@ class UTHANA_PT_characters(bpy.types.Panel):
             # Buttons for selected character
             row = box.row(align=True)
             row.operator(
-                "uthana.use_selected_character", text="Use for Generation", icon="CHECKMARK"
+                "uthana.use_selected_character", text="Use for generation", icon="CHECKMARK"
             )
             row.operator("uthana.download_character", text="Import", icon="IMPORT")
 
@@ -264,7 +262,7 @@ class UTHANA_PT_text_to_motion(bpy.types.Panel):
     """Text to Motion subpanel."""
 
     bl_idname = "UTHANA_PT_text_to_motion"
-    bl_label = "Text to Motion"
+    bl_label = "Text to motion"
     bl_parent_id = "UTHANA_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -281,7 +279,7 @@ class UTHANA_PT_text_to_motion(bpy.types.Panel):
         # Show result motion ID if available
         if props.generate_result_motion_id:
             col.separator()
-            col.label(text="Result Motion ID:")
+            col.label(text="Result motion ID:")
             col.prop(props, "generate_result_motion_id", text="")
 
 
@@ -289,7 +287,7 @@ class UTHANA_PT_text_to_motion_preview(bpy.types.Panel):
     """Preview panel for text-to-motion results."""
 
     bl_idname = "UTHANA_PT_text_to_motion_preview"
-    bl_label = "Motion Preview"
+    bl_label = "Motion preview"
     bl_parent_id = "UTHANA_PT_text_to_motion"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -364,14 +362,14 @@ class UTHANA_PT_text_to_motion_preview(bpy.types.Panel):
         row = layout.row(align=True)
         row.scale_y = 2.0
         row.operator(
-            "uthana.open_preview_browser", text="View Full Animation in Browser (FREE)", icon="PLAY"
+            "uthana.open_preview_browser", text="Preview full animation in browser", icon="PLAY"
         )
 
         layout.separator()
         row = layout.row(align=True)
         row.scale_y = 1.5
         row.operator(
-            "uthana.download_pending_motion", text="Download & Import (Uses Quota)", icon="IMPORT"
+            "uthana.download_pending_motion", text="Download & import (uses quota)", icon="IMPORT"
         )
 
         row = layout.row(align=True)
@@ -382,7 +380,7 @@ class UTHANA_PT_video_to_motion(bpy.types.Panel):
     """Video to Motion subpanel."""
 
     bl_idname = "UTHANA_PT_video_to_motion"
-    bl_label = "Video to Motion"
+    bl_label = "Video to motion"
     bl_parent_id = "UTHANA_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -408,7 +406,7 @@ class UTHANA_PT_video_to_motion(bpy.types.Panel):
         # Show result
         if props.video_result_motion_id:
             col.separator()
-            col.label(text="Result Motion ID:")
+            col.label(text="Result motion ID:")
             col.prop(props, "video_result_motion_id", text="")
 
 
@@ -416,7 +414,7 @@ class UTHANA_PT_video_to_motion_preview(bpy.types.Panel):
     """Preview panel for video-to-motion results."""
 
     bl_idname = "UTHANA_PT_video_to_motion_preview"
-    bl_label = "Motion Preview"
+    bl_label = "Motion preview"
     bl_parent_id = "UTHANA_PT_video_to_motion"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -491,14 +489,14 @@ class UTHANA_PT_video_to_motion_preview(bpy.types.Panel):
         row = layout.row(align=True)
         row.scale_y = 2.0
         row.operator(
-            "uthana.open_preview_browser", text="View Full Animation in Browser (FREE)", icon="PLAY"
+            "uthana.open_preview_browser", text="Preview full animation in browser", icon="PLAY"
         )
 
         layout.separator()
         row = layout.row(align=True)
         row.scale_y = 1.5
         row.operator(
-            "uthana.download_pending_motion", text="Download & Import (Uses Quota)", icon="IMPORT"
+            "uthana.download_pending_motion", text="Download & import (uses quota)", icon="IMPORT"
         )
 
         row = layout.row(align=True)
@@ -509,7 +507,7 @@ class UTHANA_PT_character_upload(bpy.types.Panel):
     """Character Upload subpanel."""
 
     bl_idname = "UTHANA_PT_character_upload"
-    bl_label = "Character Upload"
+    bl_label = "Character upload"
     bl_parent_id = "UTHANA_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -536,7 +534,7 @@ class UTHANA_PT_load_motion(bpy.types.Panel):
     """Load Motion subpanel."""
 
     bl_idname = "UTHANA_PT_load_motion"
-    bl_label = "Load Motion"
+    bl_label = "Load motion"
     bl_parent_id = "UTHANA_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -553,7 +551,7 @@ class UTHANA_PT_load_motion(bpy.types.Panel):
 
         if props.load_result_motion_id:
             col.separator()
-            col.label(text="Loaded Motion ID:")
+            col.label(text="Loaded motion ID:")
             col.prop(props, "load_result_motion_id", text="")
 
 
@@ -561,7 +559,7 @@ class UTHANA_PT_bake(bpy.types.Panel):
     """Bake Motion subpanel."""
 
     bl_idname = "UTHANA_PT_bake"
-    bl_label = "Bake Motion"
+    bl_label = "Bake motion"
     bl_parent_id = "UTHANA_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -598,7 +596,7 @@ class UTHANA_PT_bake(bpy.types.Panel):
 
         if props.bake_result_motion_id:
             col.separator()
-            col.label(text="Result Motion ID:", icon="CHECKMARK")
+            col.label(text="Result motion ID:", icon="CHECKMARK")
             col.prop(props, "bake_result_motion_id", text="")
 
 
@@ -606,7 +604,7 @@ class UTHANA_PT_stitch_armatures(bpy.types.Panel):
     """Stitch Armatures subpanel."""
 
     bl_idname = "UTHANA_PT_stitch_armatures"
-    bl_label = "Stitch Armatures"
+    bl_label = "Stitch armatures"
     bl_parent_id = "UTHANA_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -663,11 +661,11 @@ class UTHANA_PT_stitch_armatures(bpy.types.Panel):
             col.label(text="Select 1 armature, make another active", icon="INFO")
 
         col.separator()
-        col.operator("uthana.stitch_armatures", text="Stitch Armatures", icon="LINKED")
+        col.operator("uthana.stitch_armatures", text="Stitch armatures", icon="LINKED")
 
         if props.stitch_result_motion_id:
             col.separator()
-            col.label(text="Result Motion ID:", icon="CHECKMARK")
+            col.label(text="Result motion ID:", icon="CHECKMARK")
             col.prop(props, "stitch_result_motion_id", text="")
 
 
@@ -675,7 +673,7 @@ class UTHANA_PT_stitch_motion_ids(bpy.types.Panel):
     """Stitch Motion IDs subpanel."""
 
     bl_idname = "UTHANA_PT_stitch_motion_ids"
-    bl_label = "Stitch Motion IDs"
+    bl_label = "Stitch motion IDs"
     bl_parent_id = "UTHANA_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -690,13 +688,13 @@ class UTHANA_PT_stitch_motion_ids(bpy.types.Panel):
         col.prop(props, "stitch_ids_character_id", text="")
 
         col.separator()
-        col.label(text="Leading Motion ID:")
+        col.label(text="Leading motion ID:")
         leading_row = col.row(align=True)
         leading_row.prop(props, "stitch_ids_leading_motion_id", text="")
         leading_row.operator("uthana.paste_motion_id", text="", icon="PASTEDOWN").target = "leading"
 
         col.separator()
-        col.label(text="Trailing Motion ID:")
+        col.label(text="Trailing motion ID:")
         trailing_row = col.row(align=True)
         trailing_row.prop(props, "stitch_ids_trailing_motion_id", text="")
         trailing_row.operator(
@@ -722,11 +720,11 @@ class UTHANA_PT_stitch_motion_ids(bpy.types.Panel):
             col.label(text="Enter both Motion IDs", icon="INFO")
 
         col.separator()
-        col.operator("uthana.stitch_motion_ids", text="Stitch Motion IDs", icon="LINKED")
+        col.operator("uthana.stitch_motion_ids", text="Stitch motion IDs", icon="LINKED")
 
         if props.stitch_ids_result_motion_id:
             col.separator()
-            col.label(text="Result Motion ID:", icon="CHECKMARK")
+            col.label(text="Result motion ID:", icon="CHECKMARK")
             col.prop(props, "stitch_ids_result_motion_id", text="")
 
 

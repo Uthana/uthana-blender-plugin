@@ -11,7 +11,7 @@ import bpy
 
 from .. import assets, client, motion
 from ..constants import TAR_CHARACTER_ID
-from ..jobs import JobManager, JobStatus, PendingJob
+from ..jobs import JobManager, JobStatus
 from ..logger import logger
 
 
@@ -19,8 +19,8 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
     """Generate motion from video file (modal operator with polling)."""
 
     bl_idname = "uthana.video_to_motion"
-    bl_label = "Generate Motion from Video"
-    bl_description = "Upload a video and extract motion (async with progress)"
+    bl_label = "Generate motion from video"
+    bl_description = "Upload a 2D video and extract motion (can take 60+ seconds)"
     bl_options = {"REGISTER"}
 
     _timer = None
@@ -162,7 +162,7 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
 
         # Validate inputs
         if not props.api_key:
-            self.report({"ERROR"}, "API Key is required")
+            self.report({"ERROR"}, "API key is required")
             return {"CANCELLED"}
 
         if not props.video_file_path:
@@ -267,7 +267,7 @@ class UTHANA_OT_character_upload(bpy.types.Operator):
     """Upload a character file with auto-rigging."""
 
     bl_idname = "uthana.character_upload"
-    bl_label = "Upload Character"
+    bl_label = "Upload character"
     bl_description = "Upload a character file for auto-rigging"
     bl_options = {"REGISTER"}
 
@@ -331,7 +331,7 @@ class UTHANA_OT_character_upload(bpy.types.Operator):
 
         # Validate inputs
         if not props.api_key:
-            self.report({"ERROR"}, "API Key is required")
+            self.report({"ERROR"}, "API key is required")
             return {"CANCELLED"}
 
         if not props.character_file_path:
@@ -435,7 +435,7 @@ class UTHANA_OT_use_selected_character(bpy.types.Operator):
     """Set the selected character as the active character for generation."""
 
     bl_idname = "uthana.use_selected_character"
-    bl_label = "Use Selected Character"
+    bl_label = "Use selected character"
     bl_description = "Use the selected character for motion generation"
 
     def execute(self, context):
@@ -460,7 +460,7 @@ class UTHANA_OT_download_character(bpy.types.Operator):
     """Download and import a character from the list."""
 
     bl_idname = "uthana.download_character"
-    bl_label = "Download Character"
+    bl_label = "Download character"
     bl_description = "Download the selected character and import into scene"
 
     def execute(self, context):

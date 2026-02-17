@@ -65,8 +65,8 @@ class UTHANA_OT_load_motion(bpy.types.Operator):
     """Load motion from server by Motion ID."""
 
     bl_idname = "uthana.load_motion"
-    bl_label = "Load Motion"
-    bl_description = "Load motion from server using Motion ID"
+    bl_label = "Load motion"
+    bl_description = "Load motion from server using its motion ID"
 
     def execute(self, context):
         props = context.scene.uthana_props
@@ -86,7 +86,7 @@ class UTHANA_OT_load_motion(bpy.types.Operator):
             return {"CANCELLED"}
 
         if not request.api_key.strip():
-            self.report({"ERROR"}, "API Key is required")
+            self.report({"ERROR"}, "API key is required")
             return {"CANCELLED"}
 
         result = motion.load_motion(request)
@@ -179,7 +179,7 @@ class UTHANA_OT_stitch_armatures(bpy.types.Operator):
     """Stitch two armatures together."""
 
     bl_idname = "uthana.stitch_armatures"
-    bl_label = "Stitch Armatures"
+    bl_label = "Stitch armatures"
     bl_description = "Stitch two armatures together with transition"
 
     def execute(self, context):
@@ -208,7 +208,7 @@ class UTHANA_OT_stitch_motion_ids(bpy.types.Operator):
     """Stitch two motion IDs together."""
 
     bl_idname = "uthana.stitch_motion_ids"
-    bl_label = "Stitch Motion IDs"
+    bl_label = "Stitch motion IDs"
     bl_description = "Stitch two motion IDs together with transition"
 
     def execute(self, context):
@@ -222,9 +222,13 @@ class UTHANA_OT_stitch_motion_ids(bpy.types.Operator):
                 motion_id = result.data.get("stitched_motion_id")
                 if motion_id:
                     props.stitch_ids_result_motion_id = motion_id
+                success_message = (
+                    "Motion stitched successfully! "
+                    f"Motion ID: {result.data.get('stitched_motion_id')}"
+                )
                 self.report(
                     {"INFO"},
-                    f"Motion stitched successfully! Motion ID: {result.data.get('stitched_motion_id')}",
+                    success_message,
                 )
                 return {"FINISHED"}
             else:
@@ -240,7 +244,7 @@ class UTHANA_OT_paste_motion_id(bpy.types.Operator):
     """Paste motion ID from clipboard."""
 
     bl_idname = "uthana.paste_motion_id"
-    bl_label = "Paste Motion ID"
+    bl_label = "Paste motion ID"
     bl_description = "Paste motion ID from clipboard"
 
     target: bpy.props.StringProperty(
@@ -296,7 +300,7 @@ class UTHANA_OT_refresh_assets(bpy.types.Operator):
         props = context.scene.uthana_props
 
         if not props.api_key:
-            self.report({"ERROR"}, "API Key is required")
+            self.report({"ERROR"}, "API key is required")
             return {"CANCELLED"}
 
         manager = assets.AssetManager.instance()
@@ -344,7 +348,7 @@ class UTHANA_OT_load_selected_motion(bpy.types.Operator):
     """Load the selected motion from the list."""
 
     bl_idname = "uthana.load_selected_motion"
-    bl_label = "Load Selected"
+    bl_label = "Load motion"
     bl_description = "Load the selected motion from the list"
 
     def execute(self, context):
@@ -379,8 +383,8 @@ class UTHANA_OT_test_connection(bpy.types.Operator):
     """Test API connection with current credentials."""
 
     bl_idname = "uthana.test_connection"
-    bl_label = "Test Connection"
-    bl_description = "Test API connection with current API key"
+    bl_label = "Test connection"
+    bl_description = "Test API connection with your current API key"
 
     def execute(self, context):
         from .. import client
@@ -388,7 +392,7 @@ class UTHANA_OT_test_connection(bpy.types.Operator):
         props = context.scene.uthana_props
 
         if not props.api_key:
-            self.report({"ERROR"}, "API Key is required")
+            self.report({"ERROR"}, "API key is required")
             return {"CANCELLED"}
 
         result = client.get_user_info(props.api_key, props.domain)
@@ -417,7 +421,7 @@ class UTHANA_OT_rename_motion(bpy.types.Operator):
     """Rename the selected motion."""
 
     bl_idname = "uthana.rename_motion"
-    bl_label = "Rename Motion"
+    bl_label = "Rename motion"
     bl_description = "Rename the selected motion"
 
     new_name: bpy.props.StringProperty(
@@ -449,7 +453,7 @@ class UTHANA_OT_rename_motion(bpy.types.Operator):
         props = context.scene.uthana_props
 
         if not props.api_key:
-            self.report({"ERROR"}, "API Key is required")
+            self.report({"ERROR"}, "API key is required")
             return {"CANCELLED"}
 
         if not self.new_name.strip():
@@ -480,7 +484,7 @@ class UTHANA_OT_toggle_motion_favorite(bpy.types.Operator):
     """Toggle favorite status for the selected motion."""
 
     bl_idname = "uthana.toggle_motion_favorite"
-    bl_label = "Toggle Favorite"
+    bl_label = "Toggle favorite"
     bl_description = "Toggle favorite status for the selected motion"
 
     motion_index: bpy.props.IntProperty(default=-1)
@@ -491,7 +495,7 @@ class UTHANA_OT_toggle_motion_favorite(bpy.types.Operator):
         props = context.scene.uthana_props
 
         if not props.api_key:
-            self.report({"ERROR"}, "API Key is required")
+            self.report({"ERROR"}, "API key is required")
             return {"CANCELLED"}
 
         # Use provided index or current selection
@@ -528,7 +532,7 @@ class UTHANA_OT_copy_motion_id(bpy.types.Operator):
     """Copy the selected motion's ID to clipboard."""
 
     bl_idname = "uthana.copy_motion_id"
-    bl_label = "Copy Motion ID"
+    bl_label = "Copy motion ID"
     bl_description = "Copy the selected motion's ID to clipboard"
 
     def execute(self, context):
@@ -552,8 +556,8 @@ class UTHANA_OT_delete_motion(bpy.types.Operator):
     """Delete the selected motion."""
 
     bl_idname = "uthana.delete_motion"
-    bl_label = "Delete Motion"
-    bl_description = "Delete the selected motion (moves to trash)"
+    bl_label = "Delete motion"
+    bl_description = "Delete the selected motion"
     bl_options = {"REGISTER", "UNDO"}
 
     def invoke(self, context, event):
@@ -565,7 +569,7 @@ class UTHANA_OT_delete_motion(bpy.types.Operator):
         props = context.scene.uthana_props
 
         if not props.api_key:
-            self.report({"ERROR"}, "API Key is required")
+            self.report({"ERROR"}, "API key is required")
             return {"CANCELLED"}
 
         if not props.motions or props.motion_index < 0:
@@ -684,8 +688,8 @@ class UTHANA_OT_open_preview_browser(bpy.types.Operator):
     """Open motion preview animation in browser."""
 
     bl_idname = "uthana.open_preview_browser"
-    bl_label = "View Preview"
-    bl_description = "Open the motion preview animation in your web browser"
+    bl_label = "Preview motion"
+    bl_description = "Show a low-res preview of this motion"
 
     def execute(self, context):
         from .. import utils
@@ -714,8 +718,10 @@ class UTHANA_OT_open_web_viewer(bpy.types.Operator):
     """Open motion in web browser for preview."""
 
     bl_idname = "uthana.open_web_viewer"
-    bl_label = "View in Browser"
-    bl_description = "Open the motion in your web browser (you need to be logged in)"
+    bl_label = "Preview in browser"
+    bl_description = (
+        "Open this motion in Uthana's interactive web viewer (you need to be logged in)"
+    )
 
     def execute(self, context):
         from .. import utils
@@ -744,7 +750,7 @@ class UTHANA_OT_show_motion_preview_popup(bpy.types.Operator):
     """Show motion preview in a popup dialog."""
 
     bl_idname = "uthana.show_motion_preview_popup"
-    bl_label = "Motion Preview"
+    bl_label = "Motion preview"
     bl_description = "Preview the generated motion before downloading"
     bl_options = {"REGISTER", "INTERNAL"}
 
@@ -812,7 +818,7 @@ class UTHANA_OT_show_motion_preview_popup(bpy.types.Operator):
         # Preview video display
         if self.preview_video_path and not self.preview_download_failed:
             box = layout.box()
-            box.label(text="Preview Animation:", icon="FILE_MOVIE")
+            box.label(text="Preview animation:", icon="FILE_MOVIE")
 
             # Display the preview animation
             img_name = f"preview_{props.pending_motion_id}"
@@ -833,7 +839,7 @@ class UTHANA_OT_show_motion_preview_popup(bpy.types.Operator):
                 # Info about the preview
                 row = box.row()
                 row.scale_y = 0.8
-                row.label(text="First frame - Full animation available in browser", icon="INFO")
+                row.label(text="First frame - full animation available in browser", icon="INFO")
         elif self.preview_download_failed:
             box = layout.box()
             box.label(text=self.preview_download_message, icon="ERROR")
@@ -854,14 +860,14 @@ class UTHANA_OT_show_motion_preview_popup(bpy.types.Operator):
         row = layout.row(align=True)
         row.scale_y = 2.0
         row.operator(
-            "uthana.open_preview_browser", text="View Full Animation in Browser (FREE)", icon="PLAY"
+            "uthana.open_preview_browser", text="Preview full animation in browser", icon="PLAY"
         )
 
         layout.separator()
         row = layout.row(align=True)
         row.scale_y = 1.5
         row.operator(
-            "uthana.download_pending_motion", text="Download & Import (Uses Quota)", icon="IMPORT"
+            "uthana.download_pending_motion", text="Download & import (uses quota)", icon="IMPORT"
         )
 
         row = layout.row(align=True)
@@ -882,7 +888,7 @@ class UTHANA_OT_play_motion_preview(bpy.types.Operator):
     """Play animated motion preview using timer-based frame cycling."""
 
     bl_idname = "uthana.play_motion_preview"
-    bl_label = "Play Motion Preview"
+    bl_label = "Play motion preview"
     bl_options = {"REGISTER", "INTERNAL"}
 
     _timer = None
@@ -1037,9 +1043,13 @@ class UTHANA_OT_play_motion_preview(bpy.types.Operator):
             # ffmpeg not available - animated preview cannot be extracted
             # User can still use the browser button to view the animation
             logger.warning("ffmpeg not found - animated preview unavailable")
+            ffmpeg_warning = (
+                "ffmpeg not installed - install ffmpeg to enable animated preview, "
+                "or use browser button"
+            )
             self.report(
                 {"WARNING"},
-                "ffmpeg not installed - install ffmpeg to enable animated preview, or use browser button",
+                ffmpeg_warning,
             )
             props.preview_frames_loaded = False
             return {"CANCELLED"}

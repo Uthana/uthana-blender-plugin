@@ -44,7 +44,7 @@ class UthanaProperties(bpy.types.PropertyGroup):
 
     # Authentication
     api_key: StringProperty(
-        name="API Key",
+        name="API key",
         description="Your Uthana API key (get it from uthana.com/app/account)",
         default="",
         subtype="PASSWORD",
