@@ -8,6 +8,17 @@ an empty password.
 import base64
 from typing import Dict
 
+APP_NAME = "uthana-blender"
+DEFAULT_VERSION = "0.0.0"
+_client_version = DEFAULT_VERSION
+
+
+def set_client_version(version: str) -> None:
+    """Set client version used in request headers."""
+    global _client_version
+    normalized = version.strip() if version else ""
+    _client_version = normalized or DEFAULT_VERSION
+
 
 def create_basic_auth_header(api_key: str) -> str:
     """Creates Basic Auth header value from API key.
@@ -38,6 +49,8 @@ def create_api_headers(api_key: str) -> Dict[str, str]:
     return {
         "Content-Type": "application/json",
         "Authorization": create_basic_auth_header(api_key),
+        "User-Agent": f"{APP_NAME}/{_client_version}",
+        "X-Uthana-Client": f"{APP_NAME}/{_client_version}",
     }
 
 
@@ -52,6 +65,8 @@ def create_download_headers(api_key: str) -> Dict[str, str]:
     """
     return {
         "Authorization": create_basic_auth_header(api_key),
+        "User-Agent": f"{APP_NAME}/{_client_version}",
+        "X-Uthana-Client": f"{APP_NAME}/{_client_version}",
     }
 
 

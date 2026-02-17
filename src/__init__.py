@@ -15,9 +15,16 @@ import bpy
 from bpy.props import PointerProperty
 
 from . import config
+from .auth import set_client_version
 from .constants import CACHE_DIR
 from .logger import logger, setup_logger
+from .telemetry import log_initialized_event
 from .ui import UthanaProperties, classes as ui_classes
+
+ADDON_VERSION = ".".join(str(part) for part in bl_info["version"])
+
+# Keep HTTP client headers aligned with add-on version.
+set_client_version(ADDON_VERSION)
 
 setup_logger()
 
@@ -42,8 +49,14 @@ def register():
 
     # Load configuration
     try:
-        config.load_config()
+        loaded_config = config.load_config()
         logger.info("Uthana configuration loaded successfully")
+
+        log_initialized_event(
+            domain=loaded_config.auth.domain,
+            api_key=loaded_config.auth.api_key,
+            version=ADDON_VERSION,
+        )
     except Exception as e:
         logger.error("Failed to load Uthana configuration: %s", e)
 
