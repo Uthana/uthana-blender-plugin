@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
-from .constants import TAR_CHARACTER_ID
+from .constants import (
+    DEFAULT_TTM_MODEL,
+    DEFAULT_TTM_SECONDS,
+    DEFAULT_VTM_MODEL,
+    TAR_CHARACTER_ID,
+)
 
 
 @dataclass
@@ -21,7 +26,8 @@ class MotionRequest:
     api_key: str
     character_id: str
     prompt: str
-    model: str = "text-to-motion-ucmd"
+    model: str = DEFAULT_TTM_MODEL
+    length: Optional[float] = None
 
 
 @dataclass
@@ -63,6 +69,8 @@ class GenerateMotionRequest:
     api_key: str
     character_id: str
     prompt: str
+    model: str = DEFAULT_TTM_MODEL
+    length: Optional[float] = None
 
 
 @dataclass
@@ -125,6 +133,10 @@ class UthanaConfig:
     prompt: str = "A person "
     character_id: str = TAR_CHARACTER_ID
     generate_result_motion_id: str = ""
+    ttm_model: str = DEFAULT_TTM_MODEL
+    ttm_duration: int = DEFAULT_TTM_SECONDS
+    # Video to Motion
+    vtm_model: str = DEFAULT_VTM_MODEL
     # Load Motion
     load_motion_id: str = ""
     load_character_id: str = TAR_CHARACTER_ID
@@ -156,6 +168,9 @@ class UthanaConfig:
             "prompt": self.prompt,
             "character_id": self.character_id,
             "generate_result_motion_id": self.generate_result_motion_id,
+            "ttm_model": self.ttm_model,
+            "ttm_duration": self.ttm_duration,
+            "vtm_model": self.vtm_model,
             "load_motion_id": self.load_motion_id,
             "load_character_id": self.load_character_id,
             "load_result_motion_id": self.load_result_motion_id,
@@ -199,6 +214,9 @@ class UthanaConfig:
                 "character_id", data.get("motion_character_id", TAR_CHARACTER_ID)
             ),  # Backward compatibility
             generate_result_motion_id=data.get("generate_result_motion_id", ""),
+            ttm_model=data.get("ttm_model", DEFAULT_TTM_MODEL),
+            ttm_duration=data.get("ttm_duration", DEFAULT_TTM_SECONDS),
+            vtm_model=data.get("vtm_model", DEFAULT_VTM_MODEL),
             load_motion_id=data.get("load_motion_id", ""),
             load_character_id=data.get("load_character_id", TAR_CHARACTER_ID),
             load_result_motion_id=data.get("load_result_motion_id", ""),

@@ -1,7 +1,14 @@
 import json
 from typing import Optional
 
-from .constants import CACHE_DIR, CONFIG_PATH
+from .constants import (
+    CACHE_DIR,
+    CONFIG_PATH,
+    TTM_JOB_MAX_SECONDS,
+    TTM_JOB_MIN_SECONDS,
+    TTM_MODELS,
+    VTM_MODELS,
+)
 from .logger import logger
 from .types import OperationResult, UthanaConfig
 
@@ -53,6 +60,14 @@ def sync_config_to_ui(config: UthanaConfig, scene) -> None:
     props.prompt = config.prompt
     props.character_id = config.character_id
     props.generate_result_motion_id = config.generate_result_motion_id
+    # Saved model names can go stale between versions; keep the default if so.
+    if config.ttm_model in {model[0] for model in TTM_MODELS}:
+        props.ttm_model = config.ttm_model
+    if TTM_JOB_MIN_SECONDS <= config.ttm_duration <= TTM_JOB_MAX_SECONDS:
+        props.ttm_duration = config.ttm_duration
+    # Video to Motion
+    if config.vtm_model in {model[0] for model in VTM_MODELS}:
+        props.vtm_model = config.vtm_model
     # Load Motion
     props.load_motion_id = config.load_motion_id
     props.load_character_id = config.load_character_id
@@ -114,6 +129,10 @@ def sync_ui_to_config(scene) -> UthanaConfig:
     config.prompt = props.prompt
     config.character_id = props.character_id
     config.generate_result_motion_id = props.generate_result_motion_id
+    config.ttm_model = props.ttm_model
+    config.ttm_duration = props.ttm_duration
+    # Video to Motion
+    config.vtm_model = props.vtm_model
     # Load Motion
     config.load_motion_id = props.load_motion_id
     config.load_character_id = props.load_character_id

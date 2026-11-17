@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Build a Blender add-on zip with vendored runtime dependencies."""
+"""Build the Blender add-on zip.
+
+The zip holds one top-level `uthana/` folder with `blender_manifest.toml` inside it,
+so the same file installs as an extension on Blender 4.2+ and as a legacy add-on on
+Blender 4.0 and 4.1. Nothing is vendored: the only runtime dependency is `requests`,
+which ships with Blender.
+"""
 
 from __future__ import annotations
 
@@ -7,15 +13,13 @@ import ast
 import os
 import re
 import shutil
-import subprocess
-import sys
 import tomllib
 import zipfile
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT_DIR / "src"
-PYPROJECT_FILE = ROOT_DIR / "pyproject.toml"
+MANIFEST_FILE = SRC_DIR / "blender_manifest.toml"
 BUILD_DIR = ROOT_DIR / "build" / "addon_stage"
 DIST_DIR = ROOT_DIR / "dist"
 ADDON_MODULE_NAME = "uthana"
@@ -37,33 +41,16 @@ def read_bl_info_version(init_file: Path) -> str:
     raise ValueError("Could not find bl_info assignment in src/__init__.py")
 
 
-def read_runtime_packages(pyproject_file: Path) -> list[str]:
-    """Load runtime dependencies from Poetry, excluding Python itself."""
-    data = tomllib.loads(pyproject_file.read_text(encoding="utf-8"))
-    dependencies = data["tool"]["poetry"]["dependencies"]
-    return [name for name in dependencies if name.lower() != "python"]
+def read_manifest_version(manifest_file: Path) -> str:
+    """Read the extension version from blender_manifest.toml."""
+    data = tomllib.loads(manifest_file.read_text(encoding="utf-8"))
+    return str(data["version"])
 
 
 def stage_addon_source(stage_root: Path) -> None:
     if stage_root.exists():
         shutil.rmtree(stage_root)
-    shutil.copytree(SRC_DIR, stage_root)
-
-
-def vendor_dependencies(target_dir: Path, package_names: list[str]) -> None:
-    if not package_names:
-        return
-    cmd = [
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "--upgrade",
-        "--target",
-        str(target_dir),
-        *package_names,
-    ]
-    subprocess.run(cmd, check=True)
+    shutil.copytree(SRC_DIR, stage_root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
 
 def create_zip(stage_root: Path, version: str) -> Path:
@@ -103,17 +90,20 @@ def main() -> None:
         raise FileNotFoundError(f"Missing source directory: {SRC_DIR}")
 
     version = read_bl_info_version(SRC_DIR / "__init__.py")
+    manifest_version = read_manifest_version(MANIFEST_FILE)
+    if manifest_version != version:
+        raise ValueError(
+            "blender_manifest.toml version must match bl_info version "
+            f"(manifest={manifest_version}, bl_info={version})"
+        )
     version_label = resolve_version_label(version)
-    runtime_packages = read_runtime_packages(PYPROJECT_FILE)
 
     addon_stage_root = BUILD_DIR / ADDON_MODULE_NAME
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     stage_addon_source(addon_stage_root)
-    vendor_dependencies(addon_stage_root, runtime_packages)
     archive_path = create_zip(addon_stage_root, version_label)
 
     print(f"Built add-on zip: {archive_path}")
-    print(f"Vendored dependencies: {', '.join(runtime_packages) if runtime_packages else '(none)'}")
 
 
 if __name__ == "__main__":

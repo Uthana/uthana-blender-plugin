@@ -5,14 +5,259 @@ without blocking the UI.
 """
 
 import threading
-from typing import Optional
+import time
+from typing import Any, Callable, Optional
 
 import bpy
 
 from .. import assets, client, motion
-from ..constants import TAR_CHARACTER_ID
+from ..constants import DEFAULT_VTM_MODEL, TAR_CHARACTER_ID, TTM_JOB_MODELS
 from ..jobs import JobManager, JobStatus
 from ..logger import logger
+from ..types import MotionRequest, OperationResult
+
+# Seconds between job status checks while a job is running.
+JOB_POLL_SECONDS = 3.0
+
+
+class _BackgroundCall:
+    """Runs one blocking API call on a thread so the Blender UI stays responsive."""
+
+    def __init__(self, func: Callable[..., OperationResult], *args: Any):
+        self.result: Optional[OperationResult] = None
+        self.done = False
+        self._thread = threading.Thread(target=self._run, args=(func, *args), daemon=True)
+        self._thread.start()
+
+    def _run(self, func: Callable[..., OperationResult], *args: Any) -> None:
+        try:
+            self.result = func(*args)
+        except Exception as e:  # noqa: BLE001 - surfaced to the user by the operator
+            self.result = OperationResult(success=False, message=str(e))
+        finally:
+            self.done = True
+
+
+def _start_preview(operator: bpy.types.Operator) -> None:
+    """Auto-start the sidebar preview; a missing preview must not fail the generation."""
+    try:
+        bpy.ops.uthana.play_motion_preview("INVOKE_DEFAULT")
+    except RuntimeError as e:
+        logger.warning("Preview not available yet: %s", e)
+        operator.report({"INFO"}, "Preview not ready yet. Use the browser preview button.")
+
+
+class UTHANA_OT_generate_motion(bpy.types.Operator):
+    """Generate motion from a text prompt with the selected model.
+
+    The 3.0 models run as a background job that is polled until it finishes; the
+    older models answer in one request. Both run off the main thread.
+    """
+
+    bl_idname = "uthana.generate_motion"
+    bl_label = "Generate"
+    bl_description = "Generate motion from the text prompt with the selected model"
+    bl_options = {"REGISTER"}
+
+    # Only one generation is tracked at a time; panels read this to swap the button
+    # for a status line. A class flag (not a scene property) so it resets on restart.
+    _running: bool = False
+
+    _timer = None
+    _request: Optional[MotionRequest] = None
+    _is_job: bool = False
+    _job_id: str = ""
+    _phase: str = "submitting"  # "submitting" or "processing"
+    _started: float = 0.0
+    _last_poll: float = 0.0
+    _call: Optional[_BackgroundCall] = None
+    _poll_failures: int = 0
+    _timeout_seconds: float = 900.0
+    _max_poll_failures: int = 5
+
+    @classmethod
+    def is_running(cls) -> bool:
+        return cls._running
+
+    def execute(self, context):
+        return self.invoke(context, None)
+
+    def invoke(self, context, event):
+        props = context.scene.uthana_props
+
+        if UTHANA_OT_generate_motion._running:
+            self.report({"WARNING"}, "A generation is already running")
+            return {"CANCELLED"}
+        if not props.api_key:
+            self.report({"ERROR"}, "API key is required")
+            return {"CANCELLED"}
+        if not props.prompt.strip():
+            self.report({"ERROR"}, "Enter a prompt first")
+            return {"CANCELLED"}
+
+        request = props.create_generate_motion_request()
+        self._request = MotionRequest(
+            domain=request.domain,
+            api_key=request.api_key,
+            character_id=request.character_id,
+            prompt=request.prompt,
+            model=request.model,
+            length=request.length,
+        )
+        self._is_job = request.model in TTM_JOB_MODELS
+        self._job_id = ""
+        self._phase = "submitting"
+        self._started = time.time()
+        self._last_poll = 0.0
+        self._poll_failures = 0
+
+        submit = client.create_text_to_motion_job if self._is_job else client.create_text_to_motion
+        self._call = _BackgroundCall(submit, self._request)
+
+        UTHANA_OT_generate_motion._running = True
+        props.ttm_job_status = "Sending request..."
+
+        wm = context.window_manager
+        self._timer = wm.event_timer_add(0.5, window=context.window)
+        wm.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if event.type == "ESC":
+            if self._job_id:
+                self.report(
+                    {"WARNING"},
+                    "Stopped waiting. The job keeps running; the motion will show up in Motions.",
+                )
+            else:
+                self.report({"WARNING"}, "Stopped waiting for the request")
+            return self.finish(context, cancelled=True)
+
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+
+        props = context.scene.uthana_props
+        elapsed = int(time.time() - self._started)
+        self._redraw(context)
+
+        if self._phase == "submitting":
+            if not self._call or not self._call.done:
+                props.ttm_job_status = f"Sending request... {elapsed}s"
+                return {"PASS_THROUGH"}
+
+            result = self._call.result
+            self._call = None
+            if not result or not result.success or not result.data:
+                self.report({"ERROR"}, result.message if result else "Request failed")
+                return self.finish(context, cancelled=True)
+
+            if not self._is_job:
+                motion_data = result.data.get("motion") or {}
+                return self._complete(
+                    context, result.data.get("motion_id"), motion_data.get("name")
+                )
+
+            self._job_id = result.data.get("job_id", "")
+            if not self._job_id:
+                self.report({"ERROR"}, "No job ID returned")
+                return self.finish(context, cancelled=True)
+            self._phase = "processing"
+            return {"PASS_THROUGH"}
+
+        # Processing: check the job every few seconds, off the main thread.
+        props.ttm_job_status = f"Generating... {elapsed}s"
+
+        if self._call is None:
+            if elapsed > self._timeout_seconds:
+                self.report(
+                    {"ERROR"},
+                    "Still running after 15 minutes. Check Motions later; do not regenerate yet.",
+                )
+                return self.finish(context, cancelled=True)
+            if time.time() - self._last_poll >= JOB_POLL_SECONDS:
+                self._last_poll = time.time()
+                self._call = _BackgroundCall(
+                    client.get_job_status, self._request.api_key, self._request.domain, self._job_id
+                )
+            return {"PASS_THROUGH"}
+
+        if not self._call.done:
+            return {"PASS_THROUGH"}
+
+        result = self._call.result
+        self._call = None
+        if not result or not result.success or not result.data:
+            # A failed status check is not a failed job: retry a few times first.
+            self._poll_failures += 1
+            if self._poll_failures >= self._max_poll_failures:
+                self.report(
+                    {"ERROR"},
+                    "Lost contact with the job. It may still finish; check Motions before "
+                    "generating again.",
+                )
+                return self.finish(context, cancelled=True)
+            return {"PASS_THROUGH"}
+        self._poll_failures = 0
+
+        status = JobStatus.from_string(str(result.data.get("status", "UNKNOWN")))
+        job_result = result.data.get("result")
+
+        if status == JobStatus.FINISHED:
+            motion_id = client.extract_job_motion_id(job_result)
+            if not motion_id:
+                self.report({"WARNING"}, "Job finished but no motion ID was returned")
+                return self.finish(context, cancelled=True)
+            return self._complete(context, motion_id, client.extract_job_motion_name(job_result))
+
+        if status == JobStatus.FAILED:
+            self.report({"ERROR"}, f"Generation failed: {client.extract_job_error(job_result)}")
+            return self.finish(context, cancelled=True)
+
+        return {"PASS_THROUGH"}
+
+    def _complete(self, context, motion_id: Optional[str], motion_name: Optional[str]):
+        props = context.scene.uthana_props
+        if not motion_id:
+            self.report({"ERROR"}, "No motion ID returned")
+            return self.finish(context, cancelled=True)
+
+        motion_name = motion_name or "Generated Motion"
+
+        # Store pending motion for preview
+        props.pending_motion_id = motion_id
+        props.pending_motion_name = motion_name
+        props.pending_character_id = self._request.character_id if self._request else ""
+        props.pending_motion_source = "text"
+        props.generate_result_motion_id = motion_id
+
+        # Reset preview state
+        props.preview_frames_loaded = False
+        props.preview_current_frame_idx = 0
+        props.pending_preview_video_path = ""
+
+        self.report({"INFO"}, f"Motion '{motion_name}' generated! Check preview in sidebar.")
+        result = self.finish(context, cancelled=False)
+        _start_preview(self)
+        return result
+
+    def finish(self, context, cancelled: bool):
+        wm = context.window_manager
+        if self._timer:
+            wm.event_timer_remove(self._timer)
+            self._timer = None
+        self._call = None
+        UTHANA_OT_generate_motion._running = False
+        context.scene.uthana_props.ttm_job_status = ""
+        self._redraw(context)
+        return {"CANCELLED"} if cancelled else {"FINISHED"}
+
+    @staticmethod
+    def _redraw(context) -> None:
+        if not context.screen:
+            return
+        for area in context.screen.areas:
+            if area.type == "VIEW_3D":
+                area.tag_redraw()
 
 
 class UTHANA_OT_video_to_motion(bpy.types.Operator):
@@ -26,12 +271,13 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
     _timer = None
     _job_id: str = ""
     _poll_count: int = 0
-    _max_polls: int = 600  # 20 minutes at 2s interval
+    _max_polls: int = 400  # 20 minutes at one status check every 3s
     _upload_thread: Optional[threading.Thread] = None
     _upload_result: Optional[dict] = None
     _upload_error: Optional[str] = None
     _upload_complete: bool = False
     _phase: str = "uploading"  # "uploading" or "processing"
+    _last_poll: float = 0.0
 
     def modal(self, context, event):
         if event.type == "TIMER":
@@ -73,6 +319,11 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
                     self.report({"ERROR"}, "No job ID")
                     return self.finish(context, cancelled=True)
 
+                # The timer ticks every 0.5s; only ask the API every few seconds.
+                if time.time() - self._last_poll < JOB_POLL_SECONDS:
+                    return {"PASS_THROUGH"}
+                self._last_poll = time.time()
+
                 result = client.get_job_status(props.api_key, props.domain, self._job_id)
 
                 if not result.success:
@@ -86,13 +337,8 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
                 if status == JobStatus.FINISHED:
                     # Get motion ID from result
                     job_result = result.data.get("result", {})
-                    motion_id = None
                     motion_name = props.video_motion_name or "Video Motion"
-
-                    if isinstance(job_result, dict):
-                        motion_id = job_result.get("motion", {}).get("id")
-                        if not motion_id:
-                            motion_id = job_result.get("motion_id")
+                    motion_id = client.extract_job_motion_id(job_result)
 
                     if motion_id:
                         props.video_result_motion_id = motion_id
@@ -116,8 +362,7 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
                             {"INFO"}, f"Motion '{motion_name}' created! Check preview in sidebar."
                         )
 
-                        # Auto-start preview animation
-                        bpy.ops.uthana.play_motion_preview("INVOKE_DEFAULT")
+                        _start_preview(self)
 
                         # Refresh motions list
                         assets.AssetManager.instance().refresh_motions(
@@ -130,17 +375,14 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
                     return self.finish(context, cancelled=False)
 
                 elif status == JobStatus.FAILED:
-                    job_result = result.data.get("result", {})
-                    error = "Unknown error"
-                    if isinstance(job_result, dict):
-                        error = job_result.get("error", error)
+                    error = client.extract_job_error(result.data.get("result", {}))
                     self.report({"ERROR"}, f"Job failed: {error}")
                     return self.finish(context, cancelled=True)
 
                 # Still running - update progress estimate (10-95%)
                 self._poll_count += 1
                 # Estimate progress based on typical processing time (~2-5 min)
-                progress = min(95, 10 + (self._poll_count * 0.5))
+                progress = min(95, 10 + (self._poll_count * 1.5))
                 props.video_job_progress = progress
 
                 if self._poll_count >= self._max_polls:
@@ -177,6 +419,7 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
         self._upload_error = None
         self._upload_complete = False
         self._phase = "uploading"
+        self._last_poll = 0.0
 
         motion_name = props.video_motion_name or "Video Motion"
         props.video_job_id = ""
@@ -186,7 +429,13 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
         # Start upload in background thread
         self._upload_thread = threading.Thread(
             target=self._do_upload,
-            args=(props.api_key, props.domain, props.video_file_path, motion_name),
+            args=(
+                props.api_key,
+                props.domain,
+                props.video_file_path,
+                motion_name,
+                props.vtm_model or DEFAULT_VTM_MODEL,
+            ),
             daemon=True,
         )
         self._upload_thread.start()
@@ -199,10 +448,14 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
         self.report({"INFO"}, "Video upload started...")
         return {"RUNNING_MODAL"}
 
-    def _do_upload(self, api_key: str, domain: str, video_path: str, motion_name: str):
+    def _do_upload(
+        self, api_key: str, domain: str, video_path: str, motion_name: str, model: str
+    ):
         """Background thread for video upload."""
         try:
-            result = client.create_video_to_motion(api_key, domain, video_path, motion_name)
+            result = client.create_video_to_motion(
+                api_key, domain, video_path, motion_name, model
+            )
             if result.success:
                 self._upload_result = result.data
             else:
@@ -493,6 +746,7 @@ class UTHANA_OT_download_character(bpy.types.Operator):
 
 # Classes to register
 classes = (
+    UTHANA_OT_generate_motion,
     UTHANA_OT_video_to_motion,
     UTHANA_OT_character_upload,
     UTHANA_OT_use_selected_character,

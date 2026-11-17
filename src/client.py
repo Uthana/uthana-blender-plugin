@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional
 import requests
 
 from .auth import create_api_headers, create_download_headers
-from .constants import CACHE_DIR, TAR_CHARACTER_ID
+from .constants import CACHE_DIR, DEFAULT_VTM_MODEL, TAR_CHARACTER_ID
 from .logger import logger
 from .types import DownloadRequest, ExportRequest, MotionRequest, OperationResult, StitchRequest
 
@@ -50,8 +50,8 @@ def make_graphql_request(
 def create_text_to_motion(request: MotionRequest) -> OperationResult:
     """Creates text-to-motion via GraphQL"""
     query = """
-    mutation CreateTextToMotion($prompt: String!) {
-      create_text_to_motion(prompt: $prompt) {
+    mutation CreateTextToMotion($prompt: String!, $model: String!, $character_id: String) {
+      create_text_to_motion(prompt: $prompt, model: $model, character_id: $character_id) {
         motion {
           id
           name
@@ -60,7 +60,11 @@ def create_text_to_motion(request: MotionRequest) -> OperationResult:
     }
     """
 
-    variables = {"prompt": request.prompt}
+    variables = {
+        "prompt": request.prompt,
+        "model": request.model,
+        "character_id": request.character_id or None,
+    }
 
     url = f"https://{request.domain}/graphql"
     result = make_graphql_request(url, request.api_key, query, variables)
@@ -81,6 +85,104 @@ def create_text_to_motion(request: MotionRequest) -> OperationResult:
             )
 
     return result
+
+
+def create_text_to_motion_job(request: MotionRequest) -> OperationResult:
+    """Starts a text-to-motion job (the 3.0 model family) and returns its job ID.
+
+    The job is polled with get_job_status(); the motion ID is read from the
+    finished job with extract_job_motion_id().
+    """
+    query = """
+    mutation CreateTextToMotionJob(
+      $prompt: String!,
+      $model: String!,
+      $character_id: String,
+      $length: Float
+    ) {
+      create_text_to_motion_job(
+        prompt: $prompt,
+        model: $model,
+        character_id: $character_id,
+        length: $length
+      ) {
+        job {
+          id
+          status
+        }
+      }
+    }
+    """
+
+    variables = {
+        "prompt": request.prompt,
+        "model": request.model,
+        "character_id": request.character_id or None,
+        "length": request.length,
+    }
+
+    url = f"https://{request.domain}/graphql"
+    result = make_graphql_request(url, request.api_key, query, variables)
+
+    if result.success and result.data:
+        job = (result.data.get("create_text_to_motion_job") or {}).get("job") or {}
+        job_id = job.get("id")
+        if job_id:
+            return OperationResult(
+                success=True,
+                message=f"Generation started. Job ID: {job_id}",
+                data={"job_id": job_id, "status": job.get("status", "RESERVED")},
+            )
+        return OperationResult(success=False, message="No job ID returned", error_code="NO_JOB_ID")
+
+    return result
+
+
+def extract_job_motion_id(job_result: Any) -> Optional[str]:
+    """Reads the motion ID out of a finished job's result.
+
+    Job results can arrive wrapped in one or more {"result": ...} envelopes, and
+    the motion is reported as {"motion": {"id": ...}}, {"motion_id": ...} or
+    {"id": ...} depending on the job type.
+    """
+    for _ in range(4):
+        if isinstance(job_result, dict) and isinstance(job_result.get("result"), dict):
+            job_result = job_result["result"]
+        else:
+            break
+    if not isinstance(job_result, dict):
+        return None
+    motion = job_result.get("motion")
+    if isinstance(motion, dict) and motion.get("id"):
+        return str(motion["id"])
+    motion_id = job_result.get("motion_id") or job_result.get("id")
+    return str(motion_id) if motion_id else None
+
+
+def extract_job_motion_name(job_result: Any) -> Optional[str]:
+    """Reads the motion name out of a finished job's result, when it carries one."""
+    for _ in range(4):
+        if isinstance(job_result, dict) and isinstance(job_result.get("result"), dict):
+            job_result = job_result["result"]
+        else:
+            break
+    if not isinstance(job_result, dict):
+        return None
+    motion = job_result.get("motion")
+    name = motion.get("name") if isinstance(motion, dict) else job_result.get("name")
+    return str(name) if name else None
+
+
+def extract_job_error(job_result: Any) -> str:
+    """Reads a short error message out of a failed job's result."""
+    if isinstance(job_result, dict):
+        for key in ("error", "exc", "message"):
+            value = job_result.get(key)
+            if value:
+                lines = str(value).strip().splitlines()
+                if lines:
+                    return lines[-1]
+    return "Unknown error"
 
 
 def create_motion_from_gltf(request: ExportRequest) -> OperationResult:
@@ -371,7 +473,11 @@ def get_org_info(api_key: str, domain: str) -> OperationResult:
 
 
 def create_video_to_motion(
-    api_key: str, domain: str, video_path: str, motion_name: str
+    api_key: str,
+    domain: str,
+    video_path: str,
+    motion_name: str,
+    model: str = DEFAULT_VTM_MODEL,
 ) -> OperationResult:
     """Create a motion from a video file.
 
@@ -382,13 +488,13 @@ def create_video_to_motion(
         domain: API domain
         video_path: Path to the video file
         motion_name: Name for the created motion
+        model: Video-to-motion model name, always sent so the request does not
+            depend on the API default
 
     Returns:
         OperationResult with job_id in data if successful
     """
     import os
-
-    from .auth import create_basic_auth_header
 
     if not os.path.exists(video_path):
         return OperationResult(
@@ -399,8 +505,8 @@ def create_video_to_motion(
 
     # GraphQL multipart request for file upload
     query = """
-    mutation ($file: Upload!, $motion_name: String!) {
-        create_video_to_motion(file: $file, motion_name: $motion_name) {
+    mutation ($file: Upload!, $motion_name: String!, $model: String) {
+        create_video_to_motion(file: $file, motion_name: $motion_name, model: $model) {
             job {
                 id
                 status
@@ -413,7 +519,7 @@ def create_video_to_motion(
         # Prepare multipart form data per GraphQL multipart spec
         operations = {
             "query": query,
-            "variables": {"file": None, "motion_name": motion_name},
+            "variables": {"file": None, "motion_name": motion_name, "model": model},
         }
 
         map_data = {"0": ["variables.file"]}
@@ -421,7 +527,7 @@ def create_video_to_motion(
         import json
 
         url = f"https://{domain}/graphql"
-        headers = {"Authorization": create_basic_auth_header(api_key)}
+        headers = create_download_headers(api_key)
 
         with open(video_path, "rb") as video_file:
             files = {

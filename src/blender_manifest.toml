@@ -1,0 +1,23 @@
+# Extension manifest for Blender 4.2 and later.
+# Blender 4.0 and 4.1 ignore this file and load the add-on through bl_info in __init__.py.
+# Keep `version` in step with bl_info and pyproject.toml; `make release-prepare` updates all three.
+schema_version = "1.0.0"
+
+id = "uthana"
+version = "1.0.0"
+name = "Uthana"
+tagline = "Generate human motion from text or video with Uthana"
+maintainer = "Uthana, Inc. <support@uthana.com>"
+type = "add-on"
+
+website = "https://github.com/Uthana/uthana-blender-plugin"
+tags = ["Animation"]
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:Apache-2.0"]
+copyright = ["2026 Uthana, Inc."]
+
+[permissions]
+network = "Call the Uthana API to generate and download motions"
+files = "Read files to upload, save downloads and settings"

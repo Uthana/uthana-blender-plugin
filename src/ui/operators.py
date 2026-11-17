@@ -6,61 +6,6 @@ from .. import client, config, motion
 from ..logger import logger
 
 
-class UTHANA_OT_generate_motion(bpy.types.Operator):
-    """Generate motion from text prompt."""
-
-    bl_idname = "uthana.generate_motion"
-    bl_label = "Generate"
-    bl_description = "Generate motion from text prompt"
-
-    def execute(self, context):
-        from .. import client
-
-        props = context.scene.uthana_props
-        request = props.create_generate_motion_request()
-
-        # Create motion via API (don't download yet)
-        motion_request = motion.MotionRequest(
-            domain=request.domain,
-            api_key=request.api_key,
-            character_id=request.character_id,
-            prompt=request.prompt,
-        )
-
-        api_result = client.create_text_to_motion(motion_request)
-
-        if not api_result.success:
-            self.report({"ERROR"}, api_result.message)
-            return {"CANCELLED"}
-
-        motion_id = api_result.data.get("motion_id")
-        motion_data = api_result.data.get("motion", {})
-        motion_name = motion_data.get("name", "Generated Motion")
-
-        if not motion_id:
-            self.report({"ERROR"}, "No motion ID returned")
-            return {"CANCELLED"}
-
-        # Store pending motion for preview
-        props.pending_motion_id = motion_id
-        props.pending_motion_name = motion_name
-        props.pending_character_id = request.character_id
-        props.pending_motion_source = "text"
-        props.generate_result_motion_id = motion_id
-
-        # Reset preview state
-        props.preview_frames_loaded = False
-        props.preview_current_frame_idx = 0
-        props.pending_preview_video_path = ""
-
-        self.report({"INFO"}, f"Motion '{motion_name}' generated! Check preview in sidebar.")
-
-        # Auto-start preview animation
-        bpy.ops.uthana.play_motion_preview("INVOKE_DEFAULT")
-
-        return {"FINISHED"}
-
-
 class UTHANA_OT_load_motion(bpy.types.Operator):
     """Load motion from server by Motion ID."""
 
@@ -609,13 +554,11 @@ class UTHANA_OT_delete_motion(bpy.types.Operator):
 
 
 class UTHANA_OT_download_pending_motion(bpy.types.Operator):
-    """Download and import the pending motion (charges download seconds)."""
+    """Download and import the pending motion."""
 
     bl_idname = "uthana.download_pending_motion"
     bl_label = "Download & Import"
-    bl_description = (
-        "Download the motion and import into Blender (this will charge your download seconds)"
-    )
+    bl_description = "Download the motion and import it into the scene"
 
     def execute(self, context):
         props = context.scene.uthana_props
@@ -847,11 +790,12 @@ class UTHANA_OT_show_motion_preview_popup(bpy.types.Operator):
 
         layout.separator()
 
-        # Warning about download cost
-        box = layout.box()
-        box.label(text="Downloading will charge your account", icon="INFO")
+        # Download quota only exists on legacy subscription plans
         if props.download_secs_remaining > 0:
-            box.label(text=f"Remaining quota: {props.download_secs_remaining:.1f}s")
+            box = layout.box()
+            box.label(
+                text=f"Download quota left: {props.download_secs_remaining:.1f}s", icon="INFO"
+            )
 
         layout.separator()
 
@@ -1069,7 +1013,6 @@ class UTHANA_OT_play_motion_preview(bpy.types.Operator):
 
 # Classes to register
 classes = (
-    UTHANA_OT_generate_motion,
     UTHANA_OT_load_motion,
     UTHANA_OT_bake_motion,
     UTHANA_OT_save_config,

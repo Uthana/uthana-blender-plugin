@@ -11,7 +11,6 @@ from .types import (
     ExportRequest,
     GenerateMotionRequest,
     LoadMotionRequest,
-    MotionRequest,
     OperationResult,
     StitchMotionIdsRequest,
     StitchMotionsRequest,
@@ -24,63 +23,6 @@ try:
     BLENDER_AVAILABLE = True
 except ImportError:
     BLENDER_AVAILABLE = False
-
-
-def generate_motion(request: GenerateMotionRequest) -> OperationResult:
-    """Generate motion from text prompt"""
-    logger.info("Generating motion: %s", request.prompt)
-
-    try:
-        # Create motion request
-        motion_request = MotionRequest(
-            domain=request.domain,
-            api_key=request.api_key,
-            character_id=request.character_id,
-            prompt=request.prompt,
-        )
-
-        # Call API to generate motion
-        api_result = client.create_text_to_motion(motion_request)
-        if not api_result.success:
-            return OperationResult(success=False, message=api_result.message)
-
-        motion_id = api_result.data.get("motion_id")
-        if not motion_id:
-            return OperationResult(success=False, message="No motion ID returned")
-
-        logger.info("Motion generated successfully: %s", motion_id)
-
-        # Download and import the motion
-        download_request = DownloadRequest(
-            domain=request.domain,
-            api_key=request.api_key,
-            character_id=request.character_id,
-            motion_id=motion_id,
-        )
-
-        import_result = download_and_import_motion(
-            download_request.domain,
-            download_request.api_key,
-            download_request.character_id,
-            download_request.motion_id,
-        )
-
-        if import_result.success:
-            return OperationResult(
-                success=True,
-                message="Motion generated and imported successfully",
-                data={"motion_id": motion_id},
-            )
-        else:
-            return OperationResult(
-                success=False,
-                message=f"Motion generated but import failed: {import_result.message}",
-                data={"motion_id": motion_id},
-            )
-
-    except Exception as e:
-        logger.error("Error generating motion: %s", str(e))
-        return OperationResult(success=False, message=f"Error generating motion: {str(e)}")
 
 
 def download_and_import_motion(
