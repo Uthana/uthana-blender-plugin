@@ -98,13 +98,15 @@ def create_text_to_motion_job(request: MotionRequest) -> OperationResult:
       $prompt: String!,
       $model: String!,
       $character_id: String,
-      $length: Float
+      $length: Float,
+      $rewrite_prompt: Boolean
     ) {
       create_text_to_motion_job(
         prompt: $prompt,
         model: $model,
         character_id: $character_id,
-        length: $length
+        length: $length,
+        rewrite_prompt: $rewrite_prompt
       ) {
         job {
           id
@@ -119,6 +121,8 @@ def create_text_to_motion_job(request: MotionRequest) -> OperationResult:
         "model": request.model,
         "character_id": request.character_id or None,
         "length": request.length,
+        # Same setting the Uthana MCP uses: let the service expand short prompts.
+        "rewrite_prompt": True,
     }
 
     url = f"https://{request.domain}/graphql"
