@@ -380,9 +380,7 @@ class UTHANA_PT_text_to_motion_preview(bpy.types.Panel):
         layout.separator()
         row = layout.row(align=True)
         row.scale_y = 1.5
-        row.operator(
-            "uthana.download_pending_motion", text="Download & import", icon="IMPORT"
-        )
+        row.operator("uthana.download_pending_motion", text="Download & import", icon="IMPORT")
 
         row = layout.row(align=True)
         row.operator("uthana.cancel_pending_motion", text="Cancel", icon="CANCEL")
@@ -509,9 +507,7 @@ class UTHANA_PT_video_to_motion_preview(bpy.types.Panel):
         layout.separator()
         row = layout.row(align=True)
         row.scale_y = 1.5
-        row.operator(
-            "uthana.download_pending_motion", text="Download & import", icon="IMPORT"
-        )
+        row.operator("uthana.download_pending_motion", text="Download & import", icon="IMPORT")
 
         row = layout.row(align=True)
         row.operator("uthana.cancel_pending_motion", text="Cancel", icon="CANCEL")

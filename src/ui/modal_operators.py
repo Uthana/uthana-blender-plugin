@@ -448,14 +448,10 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
         self.report({"INFO"}, "Video upload started...")
         return {"RUNNING_MODAL"}
 
-    def _do_upload(
-        self, api_key: str, domain: str, video_path: str, motion_name: str, model: str
-    ):
+    def _do_upload(self, api_key: str, domain: str, video_path: str, motion_name: str, model: str):
         """Background thread for video upload."""
         try:
-            result = client.create_video_to_motion(
-                api_key, domain, video_path, motion_name, model
-            )
+            result = client.create_video_to_motion(api_key, domain, video_path, motion_name, model)
             if result.success:
                 self._upload_result = result.data
             else:
