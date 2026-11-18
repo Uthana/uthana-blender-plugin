@@ -7,9 +7,24 @@ from .constants import CACHE_DIR, DEFAULT_VTM_MODEL, TAR_CHARACTER_ID
 from .logger import logger
 from .types import DownloadRequest, ExportRequest, MotionRequest, OperationResult, StitchRequest
 
+# Network timeouts as (connect, read) seconds. Without them a stalled connection would
+# wait forever. Submitting a job and checking its status answer quickly; other calls
+# (a one-request generation, a stitch) can take minutes.
+DEFAULT_TIMEOUT = (10, 300)
+JOB_SUBMIT_TIMEOUT = (10, 60)
+JOB_STATUS_TIMEOUT = (10, 30)
+TRANSFER_TIMEOUT = (10, 300)
+
+# Error codes for a request whose outcome is unknown: it may have reached the server.
+OUTCOME_UNKNOWN_CODES = ("TIMEOUT", "REQUEST_ERROR")
+
 
 def make_graphql_request(
-    url: str, api_key: str, query: str, variables: Optional[Dict[str, Any]] = None
+    url: str,
+    api_key: str,
+    query: str,
+    variables: Optional[Dict[str, Any]] = None,
+    timeout: Any = DEFAULT_TIMEOUT,
 ) -> OperationResult:
     """Universal function for GraphQL requests"""
     try:
@@ -19,7 +34,7 @@ def make_graphql_request(
 
         headers = create_api_headers(api_key)
         logger.info("Sending request to %s", url)
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=timeout)
         response.raise_for_status()
 
         result = response.json()
@@ -37,6 +52,15 @@ def make_graphql_request(
             success=True, message="Request successful", data=result.get("data", {})
         )
 
+    except requests.exceptions.Timeout:
+        return OperationResult(
+            success=False, message="No answer from the server in time", error_code="TIMEOUT"
+        )
+    except requests.exceptions.HTTPError as e:
+        # The server answered and refused, so the outcome is known.
+        return OperationResult(
+            success=False, message=f"Request failed: {str(e)}", error_code="HTTP_ERROR"
+        )
     except requests.exceptions.RequestException as e:
         return OperationResult(
             success=False, message=f"Request failed: {str(e)}", error_code="REQUEST_ERROR"
@@ -126,7 +150,9 @@ def create_text_to_motion_job(request: MotionRequest) -> OperationResult:
     }
 
     url = f"https://{request.domain}/graphql"
-    result = make_graphql_request(url, request.api_key, query, variables)
+    result = make_graphql_request(
+        url, request.api_key, query, variables, timeout=JOB_SUBMIT_TIMEOUT
+    )
 
     if result.success and result.data:
         job = (result.data.get("create_text_to_motion_job") or {}).get("job") or {}
@@ -240,7 +266,9 @@ def download_motion_file(request: DownloadRequest) -> OperationResult:
         headers = create_download_headers(request.api_key)
 
         logger.info("Downloading motion file: %s", download_url)
-        response = requests.get(download_url, headers=headers, stream=True)
+        response = requests.get(
+            download_url, headers=headers, stream=True, timeout=TRANSFER_TIMEOUT
+        )
         response.raise_for_status()
 
         # Save file
@@ -541,7 +569,7 @@ def create_video_to_motion(
             }
 
             logger.info("Uploading video for motion extraction: %s", video_path)
-            response = requests.post(url, headers=headers, files=files)
+            response = requests.post(url, headers=headers, files=files, timeout=TRANSFER_TIMEOUT)
             response.raise_for_status()
 
         result = response.json()
@@ -610,7 +638,7 @@ def get_job_status(api_key: str, domain: str, job_id: str) -> OperationResult:
     variables = {"job_id": job_id}
 
     url = f"https://{domain}/graphql"
-    result = make_graphql_request(url, api_key, query, variables)
+    result = make_graphql_request(url, api_key, query, variables, timeout=JOB_STATUS_TIMEOUT)
 
     if result.success and result.data:
         job_data = result.data.get("job", {})
@@ -710,7 +738,7 @@ def create_character(
             }
 
             logger.info("Uploading character: %s", file_path)
-            response = requests.post(url, headers=headers, files=files)
+            response = requests.post(url, headers=headers, files=files, timeout=TRANSFER_TIMEOUT)
             response.raise_for_status()
 
         result = response.json()
@@ -775,7 +803,9 @@ def download_character(
 
     try:
         logger.info("Downloading character: %s", download_url)
-        response = requests.get(download_url, headers=headers, stream=True)
+        response = requests.get(
+            download_url, headers=headers, stream=True, timeout=TRANSFER_TIMEOUT
+        )
         response.raise_for_status()
 
         # Save file

@@ -47,6 +47,19 @@ def _start_preview(operator: bpy.types.Operator) -> None:
         operator.report({"INFO"}, "Preview not ready yet. Use the browser preview button.")
 
 
+def _scene_key(scene: bpy.types.Scene) -> int:
+    """A value that identifies a scene for as long as it exists, even if it is renamed."""
+    return getattr(scene, "session_uid", None) or scene.as_pointer()
+
+
+def _find_scene(key: int) -> Optional[bpy.types.Scene]:
+    """The scene a generation started in, or None if it has been deleted."""
+    for scene in bpy.data.scenes:
+        if _scene_key(scene) == key:
+            return scene
+    return None
+
+
 class UTHANA_OT_generate_motion(bpy.types.Operator):
     """Generate motion from a text prompt with the selected model.
 
@@ -64,6 +77,9 @@ class UTHANA_OT_generate_motion(bpy.types.Operator):
     _running: bool = False
 
     _timer = None
+    # The scene the generation was started in. The result and the status line belong
+    # to that scene, whichever scene is on screen when the job finishes.
+    _origin_scene: int = 0
     _request: Optional[MotionRequest] = None
     _is_job: bool = False
     _job_id: str = ""
@@ -104,6 +120,7 @@ class UTHANA_OT_generate_motion(bpy.types.Operator):
             model=request.model,
             length=request.length,
         )
+        self._origin_scene = _scene_key(context.scene)
         self._is_job = request.model in TTM_JOB_MODELS
         self._job_id = ""
         self._phase = "submitting"
@@ -136,9 +153,34 @@ class UTHANA_OT_generate_motion(bpy.types.Operator):
         if event.type != "TIMER":
             return {"PASS_THROUGH"}
 
-        props = context.scene.uthana_props
+        scene = _find_scene(self._origin_scene)
+        if scene is None:
+            self.report(
+                {"WARNING"},
+                "The scene this generation started in was removed. If the motion was "
+                "created it will show up in Motions.",
+            )
+            return self.finish(context, cancelled=True)
+        props = scene.uthana_props
         elapsed = int(time.time() - self._started)
         self._redraw(context)
+
+        # The overall deadline applies in every phase, including while a network call
+        # is still waiting for an answer.
+        if elapsed > self._timeout_seconds:
+            waited = self._waited_label()
+            if self._job_id:
+                self.report(
+                    {"ERROR"},
+                    f"Still running after {waited}. Check Motions later; do not regenerate yet.",
+                )
+            else:
+                self.report(
+                    {"ERROR"},
+                    f"No answer after {waited}. The request may still have gone through; "
+                    "check Motions before generating again.",
+                )
+            return self.finish(context, cancelled=True)
 
         if self._phase == "submitting":
             if not self._call or not self._call.done:
@@ -148,7 +190,15 @@ class UTHANA_OT_generate_motion(bpy.types.Operator):
             result = self._call.result
             self._call = None
             if not result or not result.success or not result.data:
-                self.report({"ERROR"}, result.message if result else "Request failed")
+                message = result.message if result else "Request failed"
+                # The paid request is never sent twice. When its outcome is unknown,
+                # say so instead of retrying.
+                if result and result.error_code in client.OUTCOME_UNKNOWN_CODES:
+                    message += (
+                        ". The request may still have gone through; check Motions "
+                        "before generating again."
+                    )
+                self.report({"ERROR"}, message)
                 return self.finish(context, cancelled=True)
 
             if not self._is_job:
@@ -168,12 +218,6 @@ class UTHANA_OT_generate_motion(bpy.types.Operator):
         props.ttm_job_status = f"Generating... {elapsed}s"
 
         if self._call is None:
-            if elapsed > self._timeout_seconds:
-                self.report(
-                    {"ERROR"},
-                    "Still running after 15 minutes. Check Motions later; do not regenerate yet.",
-                )
-                return self.finish(context, cancelled=True)
             if time.time() - self._last_poll >= JOB_POLL_SECONDS:
                 self._last_poll = time.time()
                 self._call = _BackgroundCall(
@@ -216,7 +260,14 @@ class UTHANA_OT_generate_motion(bpy.types.Operator):
         return {"PASS_THROUGH"}
 
     def _complete(self, context, motion_id: Optional[str], motion_name: Optional[str]):
-        props = context.scene.uthana_props
+        scene = _find_scene(self._origin_scene)
+        if scene is None:
+            self.report(
+                {"WARNING"},
+                "Motion generated, but its scene was removed. Find it in Motions.",
+            )
+            return self.finish(context, cancelled=True)
+        props = scene.uthana_props
         if not motion_id:
             self.report({"ERROR"}, "No motion ID returned")
             return self.finish(context, cancelled=True)
@@ -235,25 +286,51 @@ class UTHANA_OT_generate_motion(bpy.types.Operator):
         props.preview_current_frame_idx = 0
         props.pending_preview_video_path = ""
 
-        self.report({"INFO"}, f"Motion '{motion_name}' generated! Check preview in sidebar.")
         result = self.finish(context, cancelled=False)
-        _start_preview(self)
+        if context.scene == scene:
+            self.report({"INFO"}, f"Motion '{motion_name}' generated! Check preview in sidebar.")
+            _start_preview(self)
+        else:
+            # The preview operator works on the scene on screen, so leave it for when
+            # the user is back in the scene that owns this motion.
+            self.report(
+                {"INFO"},
+                f"Motion '{motion_name}' generated in scene '{scene.name}'. "
+                "Switch to it to preview.",
+            )
         return result
 
+    def _waited_label(self) -> str:
+        minutes = int(self._timeout_seconds // 60)
+        if minutes >= 1:
+            return f"{minutes} minutes"
+        return f"{int(self._timeout_seconds)} seconds"
+
+    def cancel(self, context):
+        # Blender calls this when it ends the operator itself, for example when a
+        # window closes or another file is opened.
+        self.finish(context, cancelled=True)
+
     def finish(self, context, cancelled: bool):
-        wm = context.window_manager
         if self._timer:
-            wm.event_timer_remove(self._timer)
+            try:
+                context.window_manager.event_timer_remove(self._timer)
+            except (AttributeError, ReferenceError, RuntimeError) as e:
+                logger.warning("Could not remove the generation timer: %s", e)
             self._timer = None
+        # A call that is still waiting is abandoned, not retried: its thread ends
+        # when the network timeout fires.
         self._call = None
         UTHANA_OT_generate_motion._running = False
-        context.scene.uthana_props.ttm_job_status = ""
+        scene = _find_scene(self._origin_scene)
+        if scene is not None:
+            scene.uthana_props.ttm_job_status = ""
         self._redraw(context)
         return {"CANCELLED"} if cancelled else {"FINISHED"}
 
     @staticmethod
     def _redraw(context) -> None:
-        if not context.screen:
+        if not getattr(context, "screen", None):
             return
         for area in context.screen.areas:
             if area.type == "VIEW_3D":
