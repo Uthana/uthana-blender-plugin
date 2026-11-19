@@ -600,6 +600,19 @@ def create_video_to_motion(
                 success=False, message="No job ID returned", error_code="NO_JOB_ID"
             )
 
+    except requests.exceptions.Timeout:
+        return OperationResult(
+            success=False,
+            message="Video upload failed: no answer from the server in time",
+            error_code="TIMEOUT",
+        )
+    except requests.exceptions.HTTPError as e:
+        # The server answered and refused, so the outcome is known.
+        return OperationResult(
+            success=False,
+            message=f"Video upload failed: {str(e)}",
+            error_code="HTTP_ERROR",
+        )
     except requests.exceptions.RequestException as e:
         return OperationResult(
             success=False,

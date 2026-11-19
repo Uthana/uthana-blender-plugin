@@ -4,7 +4,7 @@ import bpy
 
 from .. import config, utils
 from ..constants import TTM_JOB_MODELS
-from .modal_operators import UTHANA_OT_generate_motion
+from .modal_operators import UTHANA_OT_generate_motion, UTHANA_OT_video_to_motion
 
 
 class UTHANA_PT_main(bpy.types.Panel):
@@ -406,9 +406,9 @@ class UTHANA_PT_video_to_motion(bpy.types.Panel):
         col.prop(props, "vtm_model")
 
         # Show progress if job is running
-        if props.video_job_id:
+        if props.video_job_id or UTHANA_OT_video_to_motion.is_running():
             box = col.box()
-            box.label(text=f"Status: {props.video_job_status}")
+            box.label(text=f"Status: {props.video_job_status or 'Processing a video...'}")
             box.prop(props, "video_job_progress", text="Progress")
             box.label(text="Press ESC to cancel")
         else:

@@ -1,4 +1,4 @@
-"""Regression checks for the Generate operator, run inside a real Blender window.
+"""Regression checks for the two generate operators, run inside a real Blender window.
 
 No request leaves the machine: requests.post / requests.get are replaced before any
 operator runs. Results are written to a JSON file and Blender quits.
@@ -10,16 +10,18 @@ Usage (the add-on must already be installed and enabled):
 <add-on module> is `uthana` for a classic install and `bl_ext.user_default.uthana`
 for an extension install. On a machine without a display, run it under `xvfb-run`.
 
-Scenarios:
+Scenarios, for text to motion and (prefixed video_) for video to motion:
   scene_switch    the scene on screen changes while a job runs
   scene_deleted   the scene that started the job is deleted while it runs
   stalled_submit  the paid request never gets an answer
   stalled_status  a status check never gets an answer
-  submit_timeout  the paid request fails with a network timeout
+  submit_timeout  the paid request fails with a network timeout (text to motion only)
 """
 
 import json
+import os
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -33,6 +35,7 @@ OUT, MODULE = ARGS[0], ARGS[1]
 
 modal = import_module(MODULE + ".ui.modal_operators")
 OP = modal.UTHANA_OT_generate_motion
+VOP = modal.UTHANA_OT_video_to_motion
 modal.JOB_POLL_SECONDS = 0.5
 
 results = {"blender": bpy.app.version_string, "scenarios": [], "errors": []}
@@ -62,6 +65,13 @@ class FakeResponse:
 
 
 def fake_post(url, headers=None, json=None, files=None, timeout=None, **kwargs):
+    if files is not None:
+        fake["submits"] += 1
+        fake["timeouts"].append(["upload", timeout is not None])
+        if fake["submit"] == "stall":
+            release.wait(60)
+        job = {"id": "jobREG", "status": "RESERVED"}
+        return FakeResponse({"data": {"create_video_to_motion": {"job": job}}})
     query = (json or {}).get("query", "")
     if "create_text_to_motion_job" in query:
         fake["submits"] += 1
@@ -115,10 +125,26 @@ def start_generation(scene):
         return bpy.ops.uthana.generate_motion("INVOKE_DEFAULT")
 
 
-def reset_fake(submit="ok", status="finish", deadline=900.0):
+def start_video(scene):
+    props = scene.uthana_props
+    props.api_key = "test-key"
+    props.video_file_path = VIDEO_FILE
+    props.video_motion_name = "regression video"
+    props.pending_motion_id = ""
+    win, area, region = view3d()
+    with bpy.context.temp_override(window=win, area=area, region=region, scene=scene):
+        return bpy.ops.uthana.video_to_motion("INVOKE_DEFAULT")
+
+
+def reset_fake(submit="ok", status="finish", deadline=None):
     release.clear()
     fake.update(submit=submit, status=status, submits=0, status_calls=0)
-    OP._timeout_seconds = deadline
+    OP._timeout_seconds = deadline or 900.0
+    VOP._timeout_seconds = deadline or 1200.0
+
+
+def any_running():
+    return OP.is_running() or VOP.is_running()
 
 
 def base_scene():
@@ -224,18 +250,108 @@ def check_submit_timeout():
     }
 
 
+def setup_video_scene_switch():
+    reset_fake()
+    origin = base_scene()
+    window().scene = origin
+    started = start_video(origin)
+    other = bpy.data.scenes.new("Other")
+    window().scene = other
+    run["data"] = {"started": started, "other": other.name}
+
+
+def check_video_scene_switch():
+    origin, other = base_scene(), bpy.data.scenes[run["data"]["other"]]
+    checks = {
+        "started": run["data"]["started"] == {"RUNNING_MODAL"},
+        "result_in_origin_scene": origin.uthana_props.pending_motion_id == "mREG",
+        "origin_job_cleared": origin.uthana_props.video_job_id == "",
+        "nothing_in_other_scene": other.uthana_props.pending_motion_id == "",
+        "other_status_untouched": other.uthana_props.video_job_status == "",
+        "one_paid_request": fake["submits"] == 1,
+    }
+    window().scene = origin
+    bpy.data.scenes.remove(other)
+    base_scene().uthana_props.pending_motion_id = ""
+    base_scene().uthana_props.video_job_status = ""
+    return checks
+
+
+def setup_video_scene_deleted():
+    reset_fake()
+    doomed = bpy.data.scenes.new("Doomed")
+    window().scene = doomed
+    started = start_video(doomed)
+    window().scene = base_scene()
+    bpy.data.scenes.remove(doomed)
+    run["data"] = {"started": started}
+
+
+def check_video_scene_deleted():
+    origin = base_scene()
+    return {
+        "started": run["data"]["started"] == {"RUNNING_MODAL"},
+        "stopped_cleanly": not VOP.is_running(),
+        "nothing_in_other_scene": origin.uthana_props.pending_motion_id == "",
+        "other_status_untouched": origin.uthana_props.video_job_status == "",
+        "one_paid_request": fake["submits"] == 1,
+    }
+
+
+def setup_video_stalled_submit():
+    reset_fake(submit="stall", deadline=3.0)
+    run["data"] = {"started": start_video(base_scene())}
+
+
+def check_video_stalled_submit():
+    props = base_scene().uthana_props
+    return {
+        "started": run["data"]["started"] == {"RUNNING_MODAL"},
+        "stopped_at_deadline": not VOP.is_running() and run["data"]["seconds"] < 8,
+        "status_cleared": props.video_job_status == "" and props.video_job_id == "",
+        "no_result": props.pending_motion_id == "",
+        "paid_request_not_retried": fake["submits"] == 1,
+    }
+
+
+def setup_video_stalled_status():
+    reset_fake(status="stall", deadline=4.0)
+    run["data"] = {"started": start_video(base_scene())}
+
+
+def check_video_stalled_status():
+    props = base_scene().uthana_props
+    return {
+        "started": run["data"]["started"] == {"RUNNING_MODAL"},
+        "stopped_at_deadline": not VOP.is_running() and run["data"]["seconds"] < 9,
+        "status_cleared": props.video_job_status == "" and props.video_job_id == "",
+        "paid_request_not_retried": fake["submits"] == 1,
+        "status_checks_not_piled_up": fake["status_calls"] == 1,
+    }
+
+
 SCENARIOS = [
     ("scene_switch", setup_scene_switch, check_scene_switch, 20),
     ("scene_deleted", setup_scene_deleted, check_scene_deleted, 20),
     ("stalled_submit", setup_stalled_submit, check_stalled_submit, 12),
     ("stalled_status", setup_stalled_status, check_stalled_status, 14),
     ("submit_timeout", setup_submit_timeout, check_submit_timeout, 10),
+    ("video_scene_switch", setup_video_scene_switch, check_video_scene_switch, 20),
+    ("video_scene_deleted", setup_video_scene_deleted, check_video_scene_deleted, 20),
+    ("video_stalled_submit", setup_video_stalled_submit, check_video_stalled_submit, 12),
+    ("video_stalled_status", setup_video_stalled_status, check_video_stalled_status, 14),
 ]
+
+# A stand-in clip: the fake API never reads it, the add-on only checks that it exists.
+VIDEO_FILE = os.path.join(tempfile.mkdtemp(prefix="uthana_regression_"), "clip.mp4")
+with open(VIDEO_FILE, "wb") as clip:
+    clip.write(b"not a real video")
 
 
 def finish():
     release.set()
     OP._timeout_seconds = 900.0
+    VOP._timeout_seconds = 1200.0
     calls = fake["timeouts"]
     results["network_timeouts_set"] = bool(calls) and all(has for _, has in calls)
     results["passed"] = (
@@ -278,12 +394,12 @@ def begin():
 def wait():
     name, _, check, limit = SCENARIOS[run["index"]]
     seconds = time.time() - run["started"]
-    if OP.is_running() and seconds < limit:
+    if any_running() and seconds < limit:
         return 0.5
     run["data"]["seconds"] = seconds
     checks = check()
     results["scenarios"].append({"name": name, "seconds": round(seconds, 1), "checks": checks})
-    if OP.is_running():
+    if any_running():
         # Left running by a failed scenario: nothing after it can be trusted.
         results["errors"].append(f"{name}: generation still marked as running")
         finish()
@@ -301,4 +417,4 @@ def watchdog():
 
 
 bpy.app.timers.register(begin, first_interval=3.0)
-bpy.app.timers.register(watchdog, first_interval=150.0)
+bpy.app.timers.register(watchdog, first_interval=240.0)

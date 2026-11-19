@@ -338,140 +338,40 @@ class UTHANA_OT_generate_motion(bpy.types.Operator):
 
 
 class UTHANA_OT_video_to_motion(bpy.types.Operator):
-    """Generate motion from video file (modal operator with polling)."""
+    """Generate motion from a video file.
+
+    The upload and every status check run off the main thread. Like text to motion,
+    the job belongs to the scene it was started in.
+    """
 
     bl_idname = "uthana.video_to_motion"
     bl_label = "Generate motion from video"
     bl_description = "Upload a 2D video and extract motion (can take 60+ seconds)"
     bl_options = {"REGISTER"}
 
+    # Only one upload is tracked at a time; the panel reads this to hide the button
+    # while a video is uploading, so the paid request cannot be sent twice by accident.
+    _running: bool = False
+
     _timer = None
+    _origin_scene: int = 0
+    _api_key: str = ""
+    _domain: str = ""
+    _character_id: str = ""
+    _motion_name: str = ""
     _job_id: str = ""
     _poll_count: int = 0
-    _max_polls: int = 400  # 20 minutes at one status check every 3s
-    _upload_thread: Optional[threading.Thread] = None
-    _upload_result: Optional[dict] = None
-    _upload_error: Optional[str] = None
-    _upload_complete: bool = False
     _phase: str = "uploading"  # "uploading" or "processing"
+    _started: float = 0.0
     _last_poll: float = 0.0
+    _call: Optional[_BackgroundCall] = None
+    _poll_failures: int = 0
+    _timeout_seconds: float = 1200.0
+    _max_poll_failures: int = 5
 
-    def modal(self, context, event):
-        if event.type == "TIMER":
-            props = context.scene.uthana_props
-
-            # Force UI redraw
-            for area in context.screen.areas:
-                if area.type == "VIEW_3D":
-                    area.tag_redraw()
-
-            # Phase 1: Waiting for upload to complete
-            if self._phase == "uploading":
-                if self._upload_complete:
-                    if self._upload_error:
-                        self.report({"ERROR"}, self._upload_error)
-                        return self.finish(context, cancelled=True)
-
-                    if self._upload_result:
-                        self._job_id = self._upload_result.get("job_id", "")
-                        props.video_job_id = self._job_id
-                        props.video_job_status = self._upload_result.get("status", "RESERVED")
-                        props.video_job_progress = 10  # Upload done, processing starts
-                        self._phase = "processing"
-                        self.report({"INFO"}, "Video uploaded, processing...")
-                    else:
-                        self.report({"ERROR"}, "Upload failed - no result")
-                        return self.finish(context, cancelled=True)
-                else:
-                    # Still uploading - show indeterminate progress
-                    self._poll_count += 1
-                    props.video_job_status = "Uploading..."
-                    # Animate progress bar during upload (0-10%)
-                    props.video_job_progress = min(10, (self._poll_count % 10))
-                    return {"PASS_THROUGH"}
-
-            # Phase 2: Polling for job completion
-            if self._phase == "processing":
-                if not self._job_id:
-                    self.report({"ERROR"}, "No job ID")
-                    return self.finish(context, cancelled=True)
-
-                # The timer ticks every 0.5s; only ask the API every few seconds.
-                if time.time() - self._last_poll < JOB_POLL_SECONDS:
-                    return {"PASS_THROUGH"}
-                self._last_poll = time.time()
-
-                result = client.get_job_status(props.api_key, props.domain, self._job_id)
-
-                if not result.success:
-                    self.report({"ERROR"}, result.message)
-                    return self.finish(context, cancelled=True)
-
-                status_str = result.data.get("status", "UNKNOWN")
-                status = JobStatus.from_string(status_str)
-                props.video_job_status = status_str
-
-                if status == JobStatus.FINISHED:
-                    # Get motion ID from result
-                    job_result = result.data.get("result", {})
-                    motion_name = props.video_motion_name or "Video Motion"
-                    motion_id = client.extract_job_motion_id(job_result)
-
-                    if motion_id:
-                        props.video_result_motion_id = motion_id
-                        props.video_job_progress = 100
-
-                        # Get character ID
-                        char_id = props.character_id or TAR_CHARACTER_ID
-
-                        # Store pending motion for preview
-                        props.pending_motion_id = motion_id
-                        props.pending_motion_name = motion_name
-                        props.pending_character_id = char_id
-                        props.pending_motion_source = "video"
-
-                        # Reset preview state
-                        props.preview_frames_loaded = False
-                        props.preview_current_frame_idx = 0
-                        props.pending_preview_video_path = ""
-
-                        self.report(
-                            {"INFO"}, f"Motion '{motion_name}' created! Check preview in sidebar."
-                        )
-
-                        _start_preview(self)
-
-                        # Refresh motions list
-                        assets.AssetManager.instance().refresh_motions(
-                            props.api_key, props.domain, force=True
-                        )
-                        self._sync_motions_to_ui(props)
-                    else:
-                        self.report({"WARNING"}, "Motion created but ID not found in result")
-
-                    return self.finish(context, cancelled=False)
-
-                elif status == JobStatus.FAILED:
-                    error = client.extract_job_error(result.data.get("result", {}))
-                    self.report({"ERROR"}, f"Job failed: {error}")
-                    return self.finish(context, cancelled=True)
-
-                # Still running - update progress estimate (10-95%)
-                self._poll_count += 1
-                # Estimate progress based on typical processing time (~2-5 min)
-                progress = min(95, 10 + (self._poll_count * 1.5))
-                props.video_job_progress = progress
-
-                if self._poll_count >= self._max_polls:
-                    self.report({"ERROR"}, "Job timed out")
-                    return self.finish(context, cancelled=True)
-
-        elif event.type == "ESC":
-            self.report({"WARNING"}, "Job cancelled by user")
-            return self.finish(context, cancelled=True)
-
-        # PASS_THROUGH allows other Blender events to be processed
-        return {"PASS_THROUGH"}
+    @classmethod
+    def is_running(cls) -> bool:
+        return cls._running
 
     def execute(self, context):
         return self.invoke(context, None)
@@ -479,88 +379,246 @@ class UTHANA_OT_video_to_motion(bpy.types.Operator):
     def invoke(self, context, event):
         props = context.scene.uthana_props
 
-        # Validate inputs
+        if UTHANA_OT_video_to_motion._running:
+            self.report({"WARNING"}, "A video is already being processed")
+            return {"CANCELLED"}
         if not props.api_key:
             self.report({"ERROR"}, "API key is required")
             return {"CANCELLED"}
-
         if not props.video_file_path:
             self.report({"ERROR"}, "No video file selected")
             return {"CANCELLED"}
 
-        # Reset state
+        # Everything the job needs is read once, here, from the scene that starts it.
+        self._origin_scene = _scene_key(context.scene)
+        self._api_key = props.api_key
+        self._domain = props.domain
+        self._character_id = props.character_id or TAR_CHARACTER_ID
+        self._motion_name = props.video_motion_name or "Video Motion"
         self._job_id = ""
         self._poll_count = 0
-        self._upload_thread = None
-        self._upload_result = None
-        self._upload_error = None
-        self._upload_complete = False
         self._phase = "uploading"
+        self._started = time.time()
         self._last_poll = 0.0
+        self._poll_failures = 0
 
-        motion_name = props.video_motion_name or "Video Motion"
         props.video_job_id = ""
         props.video_job_status = "Starting upload..."
         props.video_job_progress = 0
 
-        # Start upload in background thread
-        self._upload_thread = threading.Thread(
-            target=self._do_upload,
-            args=(
-                props.api_key,
-                props.domain,
-                props.video_file_path,
-                motion_name,
-                props.vtm_model or DEFAULT_VTM_MODEL,
-            ),
-            daemon=True,
+        self._call = _BackgroundCall(
+            client.create_video_to_motion,
+            self._api_key,
+            self._domain,
+            props.video_file_path,
+            self._motion_name,
+            props.vtm_model or DEFAULT_VTM_MODEL,
         )
-        self._upload_thread.start()
+        UTHANA_OT_video_to_motion._running = True
 
-        # Start timer for polling
         wm = context.window_manager
-        self._timer = wm.event_timer_add(0.5, window=context.window)  # Check every 0.5s
+        self._timer = wm.event_timer_add(0.5, window=context.window)
         wm.modal_handler_add(self)
 
         self.report({"INFO"}, "Video upload started...")
         return {"RUNNING_MODAL"}
 
-    def _do_upload(self, api_key: str, domain: str, video_path: str, motion_name: str, model: str):
-        """Background thread for video upload."""
-        try:
-            result = client.create_video_to_motion(api_key, domain, video_path, motion_name, model)
-            if result.success:
-                self._upload_result = result.data
+    def modal(self, context, event):
+        if event.type == "ESC":
+            if self._job_id:
+                self.report(
+                    {"WARNING"},
+                    "Stopped waiting. The job keeps running; the motion will show up in Motions.",
+                )
             else:
-                self._upload_error = result.message
-        except Exception as e:
-            self._upload_error = str(e)
-        finally:
-            self._upload_complete = True
+                self.report({"WARNING"}, "Stopped waiting for the upload")
+            return self.finish(context, cancelled=True)
+
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+
+        scene = _find_scene(self._origin_scene)
+        if scene is None:
+            self.report(
+                {"WARNING"},
+                "The scene this job started in was removed. If the motion was created "
+                "it will show up in Motions.",
+            )
+            return self.finish(context, cancelled=True)
+        props = scene.uthana_props
+        self._redraw(context)
+
+        # The overall deadline applies in every phase, including while a network call
+        # is still waiting for an answer.
+        if time.time() - self._started > self._timeout_seconds:
+            minutes = max(1, int(self._timeout_seconds // 60))
+            if self._job_id:
+                self.report(
+                    {"ERROR"},
+                    f"Still running after {minutes} minutes. Check Motions later; "
+                    "do not upload again yet.",
+                )
+            else:
+                self.report(
+                    {"ERROR"},
+                    f"No answer after {minutes} minutes. The upload may still have gone "
+                    "through; check Motions before uploading again.",
+                )
+            return self.finish(context, cancelled=True)
+
+        if self._phase == "uploading":
+            if not self._call or not self._call.done:
+                self._poll_count += 1
+                props.video_job_status = "Uploading..."
+                props.video_job_progress = min(10, (self._poll_count % 10))
+                return {"PASS_THROUGH"}
+
+            result = self._call.result
+            self._call = None
+            if not result or not result.success or not result.data:
+                message = result.message if result else "Upload failed - no result"
+                # The paid upload is never sent twice. When its outcome is unknown,
+                # say so instead of retrying.
+                if result and result.error_code in client.OUTCOME_UNKNOWN_CODES:
+                    message += (
+                        ". The upload may still have gone through; check Motions "
+                        "before uploading again."
+                    )
+                self.report({"ERROR"}, message)
+                return self.finish(context, cancelled=True)
+
+            self._job_id = result.data.get("job_id", "")
+            if not self._job_id:
+                self.report({"ERROR"}, "No job ID")
+                return self.finish(context, cancelled=True)
+            props.video_job_id = self._job_id
+            props.video_job_status = result.data.get("status", "RESERVED")
+            props.video_job_progress = 10  # Upload done, processing starts
+            self._poll_count = 0
+            self._phase = "processing"
+            self.report({"INFO"}, "Video uploaded, processing...")
+            return {"PASS_THROUGH"}
+
+        # Processing: check the job every few seconds, off the main thread.
+        if self._call is None:
+            if time.time() - self._last_poll >= JOB_POLL_SECONDS:
+                self._last_poll = time.time()
+                self._call = _BackgroundCall(
+                    client.get_job_status, self._api_key, self._domain, self._job_id
+                )
+            return {"PASS_THROUGH"}
+
+        if not self._call.done:
+            return {"PASS_THROUGH"}
+
+        result = self._call.result
+        self._call = None
+        if not result or not result.success or not result.data:
+            # A failed status check is not a failed job: retry a few times first.
+            self._poll_failures += 1
+            if self._poll_failures >= self._max_poll_failures:
+                self.report(
+                    {"ERROR"},
+                    "Lost contact with the job. It may still finish; check Motions before "
+                    "uploading again.",
+                )
+                return self.finish(context, cancelled=True)
+            return {"PASS_THROUGH"}
+        self._poll_failures = 0
+
+        status_str = str(result.data.get("status", "UNKNOWN"))
+        status = JobStatus.from_string(status_str)
+        props.video_job_status = status_str
+        job_result = result.data.get("result")
+
+        if status == JobStatus.FINISHED:
+            motion_id = client.extract_job_motion_id(job_result)
+            if not motion_id:
+                self.report({"WARNING"}, "Motion created but ID not found in result")
+                return self.finish(context, cancelled=False)
+
+            props.video_result_motion_id = motion_id
+            props.video_job_progress = 100
+
+            # Store pending motion for preview
+            props.pending_motion_id = motion_id
+            props.pending_motion_name = self._motion_name
+            props.pending_character_id = self._character_id
+            props.pending_motion_source = "video"
+
+            # Reset preview state
+            props.preview_frames_loaded = False
+            props.preview_current_frame_idx = 0
+            props.pending_preview_video_path = ""
+
+            if context.scene == scene:
+                self.report(
+                    {"INFO"}, f"Motion '{self._motion_name}' created! Check preview in sidebar."
+                )
+                _start_preview(self)
+            else:
+                # The preview operator works on the scene on screen, so leave it for
+                # when the user is back in the scene that owns this motion.
+                self.report(
+                    {"INFO"},
+                    f"Motion '{self._motion_name}' created in scene '{scene.name}'. "
+                    "Switch to it to preview.",
+                )
+
+            # Refresh motions list
+            assets.AssetManager.instance().refresh_motions(self._api_key, self._domain, force=True)
+            self._sync_motions_to_ui(props)
+            return self.finish(context, cancelled=False)
+
+        if status == JobStatus.FAILED:
+            self.report({"ERROR"}, f"Job failed: {client.extract_job_error(job_result)}")
+            return self.finish(context, cancelled=True)
+
+        # Still running - progress estimate (10-95%) from typical processing time.
+        self._poll_count += 1
+        props.video_job_progress = min(95, 10 + (self._poll_count * 1.5))
+        return {"PASS_THROUGH"}
+
+    def cancel(self, context):
+        # Blender calls this when it ends the operator itself, for example when a
+        # window closes or another file is opened.
+        self.finish(context, cancelled=True)
 
     def finish(self, context, cancelled: bool):
         """Clean up and finish the operator."""
-        wm = context.window_manager
         if self._timer:
-            wm.event_timer_remove(self._timer)
+            try:
+                context.window_manager.event_timer_remove(self._timer)
+            except (AttributeError, ReferenceError, RuntimeError) as e:
+                logger.warning("Could not remove the video job timer: %s", e)
             self._timer = None
+        # A call that is still waiting is abandoned, not retried: its thread ends
+        # when the network timeout fires.
+        self._call = None
+        UTHANA_OT_video_to_motion._running = False
 
-        props = context.scene.uthana_props
-        props.video_job_id = ""
-        if cancelled:
-            props.video_job_progress = 0
-            props.video_job_status = ""
+        scene = _find_scene(self._origin_scene)
+        if scene is not None:
+            props = scene.uthana_props
+            props.video_job_id = ""
+            if cancelled:
+                props.video_job_progress = 0
+                props.video_job_status = ""
 
         # Remove from job manager
         if self._job_id:
             JobManager.instance().remove_job(self._job_id)
 
-        # Force final UI redraw
+        self._redraw(context)
+        return {"CANCELLED"} if cancelled else {"FINISHED"}
+
+    @staticmethod
+    def _redraw(context) -> None:
+        if not getattr(context, "screen", None):
+            return
         for area in context.screen.areas:
             if area.type == "VIEW_3D":
                 area.tag_redraw()
-
-        return {"CANCELLED"} if cancelled else {"FINISHED"}
 
     def import_motion(self, context, motion_id: str):
         """Download and import the generated motion."""
