@@ -6,11 +6,22 @@ import bpy
 from bpy.props import (
     BoolProperty,
     CollectionProperty,
+    EnumProperty,
     FloatProperty,
     IntProperty,
     StringProperty,
 )
 
+from ..constants import (
+    DEFAULT_TTM_MODEL,
+    DEFAULT_TTM_SECONDS,
+    DEFAULT_VTM_MODEL,
+    TTM_JOB_MAX_SECONDS,
+    TTM_JOB_MIN_SECONDS,
+    TTM_JOB_MODELS,
+    TTM_MODELS,
+    VTM_MODELS,
+)
 from ..types import (
     BakeAndUploadRequest,
     GenerateMotionRequest,
@@ -83,6 +94,23 @@ class UthanaProperties(bpy.types.PropertyGroup):
         default="cXi2eAP19XwQ",
     )
 
+    ttm_model: EnumProperty(
+        name="Model",
+        description="Text-to-motion model. Prices per model are listed at uthana.com/pricing",
+        items=TTM_MODELS,
+        default=DEFAULT_TTM_MODEL,
+    )
+
+    ttm_duration: IntProperty(
+        name="Length (seconds)",
+        description="Length of the generated motion. Longer motions cost more",
+        min=TTM_JOB_MIN_SECONDS,
+        max=TTM_JOB_MAX_SECONDS,
+        default=DEFAULT_TTM_SECONDS,
+    )
+
+    ttm_job_status: StringProperty(name="Generation Status", default="")
+
     generate_result_motion_id: StringProperty(
         name="Result Motion ID",
         description="Motion ID from last text-to-motion generation",
@@ -100,6 +128,13 @@ class UthanaProperties(bpy.types.PropertyGroup):
         name="Motion Name",
         description="Name for the generated motion",
         default="",
+    )
+
+    vtm_model: EnumProperty(
+        name="Model",
+        description="Video-to-motion model. Prices per model are listed at uthana.com/pricing",
+        items=VTM_MODELS,
+        default=DEFAULT_VTM_MODEL,
     )
 
     video_job_id: StringProperty(name="Job ID", default="")
@@ -375,6 +410,8 @@ class UthanaProperties(bpy.types.PropertyGroup):
             api_key=self.api_key,
             character_id=self.character_id,
             prompt=self.prompt,
+            model=self.ttm_model,
+            length=float(self.ttm_duration) if self.ttm_model in TTM_JOB_MODELS else None,
         )
 
     def create_load_motion_request(self) -> LoadMotionRequest:

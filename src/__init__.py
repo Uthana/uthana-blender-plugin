@@ -8,8 +8,10 @@ bl_info = {
     "description": "AI-powered motion generation plugin for Uthana: Text to Motion, Video to Motion, and more.",
     "category": "Animation",
     "doc_url": "https://uthana.com/docs/api",
-    "tracker_url": "https://github.com/Uthana/uthana/issues",
+    "tracker_url": "https://github.com/Uthana/uthana-blender-plugin/issues",
 }
+
+import threading
 
 import bpy
 from bpy.props import PointerProperty
@@ -52,11 +54,19 @@ def register():
         loaded_config = config.load_config()
         logger.info("Uthana configuration loaded successfully")
 
-        log_initialized_event(
-            domain=loaded_config.auth.domain,
-            api_key=loaded_config.auth.api_key,
-            version=ADDON_VERSION,
-        )
+        # Sent once per interactive start, on a thread so Blender's startup never waits
+        # on the network. Skipped for background runs (render farms, scripts), which
+        # would otherwise send one event per render.
+        if not bpy.app.background:
+            threading.Thread(
+                target=log_initialized_event,
+                kwargs={
+                    "domain": loaded_config.auth.domain,
+                    "api_key": loaded_config.auth.api_key,
+                    "version": ADDON_VERSION,
+                },
+                daemon=True,
+            ).start()
     except Exception as e:
         logger.error("Failed to load Uthana configuration: %s", e)
 

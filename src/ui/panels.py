@@ -3,6 +3,8 @@
 import bpy
 
 from .. import config, utils
+from ..constants import TTM_JOB_MODELS
+from .modal_operators import UTHANA_OT_generate_motion, UTHANA_OT_video_to_motion
 
 
 class UTHANA_PT_main(bpy.types.Panel):
@@ -273,8 +275,17 @@ class UTHANA_PT_text_to_motion(bpy.types.Panel):
 
         col = layout.column(align=True)
         col.prop(props, "prompt")
+        col.prop(props, "ttm_model")
+        if props.ttm_model in TTM_JOB_MODELS:
+            col.prop(props, "ttm_duration")
         col.prop(props, "character_id")
-        col.operator("uthana.generate_motion", icon="MOD_WAVE")
+
+        if UTHANA_OT_generate_motion.is_running():
+            box = col.box()
+            box.label(text=props.ttm_job_status or "Generating...", icon="TIME")
+            box.label(text="Press ESC to stop waiting")
+        else:
+            col.operator("uthana.generate_motion", icon="MOD_WAVE")
 
         # Show result motion ID if available
         if props.generate_result_motion_id:
@@ -351,11 +362,12 @@ class UTHANA_PT_text_to_motion_preview(bpy.types.Panel):
 
         layout.separator()
 
-        # Warning about download cost
-        warning_box = layout.box()
-        warning_box.label(text="Downloading will charge your account", icon="INFO")
+        # Download quota only exists on legacy subscription plans
         if props.download_secs_remaining > 0:
-            warning_box.label(text=f"Remaining quota: {props.download_secs_remaining:.1f}s")
+            quota_box = layout.box()
+            quota_box.label(
+                text=f"Download quota left: {props.download_secs_remaining:.1f}s", icon="INFO"
+            )
 
         # Action buttons
         layout.separator()
@@ -368,9 +380,7 @@ class UTHANA_PT_text_to_motion_preview(bpy.types.Panel):
         layout.separator()
         row = layout.row(align=True)
         row.scale_y = 1.5
-        row.operator(
-            "uthana.download_pending_motion", text="Download & import (uses quota)", icon="IMPORT"
-        )
+        row.operator("uthana.download_pending_motion", text="Download & import", icon="IMPORT")
 
         row = layout.row(align=True)
         row.operator("uthana.cancel_pending_motion", text="Cancel", icon="CANCEL")
@@ -393,11 +403,12 @@ class UTHANA_PT_video_to_motion(bpy.types.Panel):
         col = layout.column(align=True)
         col.prop(props, "video_file_path")
         col.prop(props, "video_motion_name")
+        col.prop(props, "vtm_model")
 
         # Show progress if job is running
-        if props.video_job_id:
+        if props.video_job_id or UTHANA_OT_video_to_motion.is_running():
             box = col.box()
-            box.label(text=f"Status: {props.video_job_status}")
+            box.label(text=f"Status: {props.video_job_status or 'Processing a video...'}")
             box.prop(props, "video_job_progress", text="Progress")
             box.label(text="Press ESC to cancel")
         else:
@@ -478,11 +489,12 @@ class UTHANA_PT_video_to_motion_preview(bpy.types.Panel):
 
         layout.separator()
 
-        # Warning about download cost
-        warning_box = layout.box()
-        warning_box.label(text="Downloading will charge your account", icon="INFO")
+        # Download quota only exists on legacy subscription plans
         if props.download_secs_remaining > 0:
-            warning_box.label(text=f"Remaining quota: {props.download_secs_remaining:.1f}s")
+            quota_box = layout.box()
+            quota_box.label(
+                text=f"Download quota left: {props.download_secs_remaining:.1f}s", icon="INFO"
+            )
 
         # Action buttons
         layout.separator()
@@ -495,9 +507,7 @@ class UTHANA_PT_video_to_motion_preview(bpy.types.Panel):
         layout.separator()
         row = layout.row(align=True)
         row.scale_y = 1.5
-        row.operator(
-            "uthana.download_pending_motion", text="Download & import (uses quota)", icon="IMPORT"
-        )
+        row.operator("uthana.download_pending_motion", text="Download & import", icon="IMPORT")
 
         row = layout.row(align=True)
         row.operator("uthana.cancel_pending_motion", text="Cancel", icon="CANCEL")

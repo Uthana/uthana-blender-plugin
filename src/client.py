@@ -3,13 +3,28 @@ from typing import Any, Dict, Optional
 import requests
 
 from .auth import create_api_headers, create_download_headers
-from .constants import CACHE_DIR, TAR_CHARACTER_ID
+from .constants import CACHE_DIR, DEFAULT_VTM_MODEL, TAR_CHARACTER_ID
 from .logger import logger
 from .types import DownloadRequest, ExportRequest, MotionRequest, OperationResult, StitchRequest
 
+# Network timeouts as (connect, read) seconds. Without them a stalled connection would
+# wait forever. Submitting a job and checking its status answer quickly; other calls
+# (a one-request generation, a stitch) can take minutes.
+DEFAULT_TIMEOUT = (10, 300)
+JOB_SUBMIT_TIMEOUT = (10, 60)
+JOB_STATUS_TIMEOUT = (10, 30)
+TRANSFER_TIMEOUT = (10, 300)
+
+# Error codes for a request whose outcome is unknown: it may have reached the server.
+OUTCOME_UNKNOWN_CODES = ("TIMEOUT", "REQUEST_ERROR")
+
 
 def make_graphql_request(
-    url: str, api_key: str, query: str, variables: Optional[Dict[str, Any]] = None
+    url: str,
+    api_key: str,
+    query: str,
+    variables: Optional[Dict[str, Any]] = None,
+    timeout: Any = DEFAULT_TIMEOUT,
 ) -> OperationResult:
     """Universal function for GraphQL requests"""
     try:
@@ -19,7 +34,7 @@ def make_graphql_request(
 
         headers = create_api_headers(api_key)
         logger.info("Sending request to %s", url)
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=timeout)
         response.raise_for_status()
 
         result = response.json()
@@ -37,6 +52,15 @@ def make_graphql_request(
             success=True, message="Request successful", data=result.get("data", {})
         )
 
+    except requests.exceptions.Timeout:
+        return OperationResult(
+            success=False, message="No answer from the server in time", error_code="TIMEOUT"
+        )
+    except requests.exceptions.HTTPError as e:
+        # The server answered and refused, so the outcome is known.
+        return OperationResult(
+            success=False, message=f"Request failed: {str(e)}", error_code="HTTP_ERROR"
+        )
     except requests.exceptions.RequestException as e:
         return OperationResult(
             success=False, message=f"Request failed: {str(e)}", error_code="REQUEST_ERROR"
@@ -50,8 +74,8 @@ def make_graphql_request(
 def create_text_to_motion(request: MotionRequest) -> OperationResult:
     """Creates text-to-motion via GraphQL"""
     query = """
-    mutation CreateTextToMotion($prompt: String!) {
-      create_text_to_motion(prompt: $prompt) {
+    mutation CreateTextToMotion($prompt: String!, $model: String!, $character_id: String) {
+      create_text_to_motion(prompt: $prompt, model: $model, character_id: $character_id) {
         motion {
           id
           name
@@ -60,7 +84,11 @@ def create_text_to_motion(request: MotionRequest) -> OperationResult:
     }
     """
 
-    variables = {"prompt": request.prompt}
+    variables = {
+        "prompt": request.prompt,
+        "model": request.model,
+        "character_id": request.character_id or None,
+    }
 
     url = f"https://{request.domain}/graphql"
     result = make_graphql_request(url, request.api_key, query, variables)
@@ -81,6 +109,110 @@ def create_text_to_motion(request: MotionRequest) -> OperationResult:
             )
 
     return result
+
+
+def create_text_to_motion_job(request: MotionRequest) -> OperationResult:
+    """Starts a text-to-motion job (the 3.0 model family) and returns its job ID.
+
+    The job is polled with get_job_status(); the motion ID is read from the
+    finished job with extract_job_motion_id().
+    """
+    query = """
+    mutation CreateTextToMotionJob(
+      $prompt: String!,
+      $model: String!,
+      $character_id: String,
+      $length: Float,
+      $rewrite_prompt: Boolean
+    ) {
+      create_text_to_motion_job(
+        prompt: $prompt,
+        model: $model,
+        character_id: $character_id,
+        length: $length,
+        rewrite_prompt: $rewrite_prompt
+      ) {
+        job {
+          id
+          status
+        }
+      }
+    }
+    """
+
+    variables = {
+        "prompt": request.prompt,
+        "model": request.model,
+        "character_id": request.character_id or None,
+        "length": request.length,
+        # Same setting the Uthana MCP uses: let the service expand short prompts.
+        "rewrite_prompt": True,
+    }
+
+    url = f"https://{request.domain}/graphql"
+    result = make_graphql_request(
+        url, request.api_key, query, variables, timeout=JOB_SUBMIT_TIMEOUT
+    )
+
+    if result.success and result.data:
+        job = (result.data.get("create_text_to_motion_job") or {}).get("job") or {}
+        job_id = job.get("id")
+        if job_id:
+            return OperationResult(
+                success=True,
+                message=f"Generation started. Job ID: {job_id}",
+                data={"job_id": job_id, "status": job.get("status", "RESERVED")},
+            )
+        return OperationResult(success=False, message="No job ID returned", error_code="NO_JOB_ID")
+
+    return result
+
+
+def extract_job_motion_id(job_result: Any) -> Optional[str]:
+    """Reads the motion ID out of a finished job's result.
+
+    Job results can arrive wrapped in one or more {"result": ...} envelopes, and
+    the motion is reported as {"motion": {"id": ...}}, {"motion_id": ...} or
+    {"id": ...} depending on the job type.
+    """
+    for _ in range(4):
+        if isinstance(job_result, dict) and isinstance(job_result.get("result"), dict):
+            job_result = job_result["result"]
+        else:
+            break
+    if not isinstance(job_result, dict):
+        return None
+    motion = job_result.get("motion")
+    if isinstance(motion, dict) and motion.get("id"):
+        return str(motion["id"])
+    motion_id = job_result.get("motion_id") or job_result.get("id")
+    return str(motion_id) if motion_id else None
+
+
+def extract_job_motion_name(job_result: Any) -> Optional[str]:
+    """Reads the motion name out of a finished job's result, when it carries one."""
+    for _ in range(4):
+        if isinstance(job_result, dict) and isinstance(job_result.get("result"), dict):
+            job_result = job_result["result"]
+        else:
+            break
+    if not isinstance(job_result, dict):
+        return None
+    motion = job_result.get("motion")
+    name = motion.get("name") if isinstance(motion, dict) else job_result.get("name")
+    return str(name) if name else None
+
+
+def extract_job_error(job_result: Any) -> str:
+    """Reads a short error message out of a failed job's result."""
+    if isinstance(job_result, dict):
+        for key in ("error", "exc", "message"):
+            value = job_result.get(key)
+            if value:
+                lines = str(value).strip().splitlines()
+                if lines:
+                    return lines[-1]
+    return "Unknown error"
 
 
 def create_motion_from_gltf(request: ExportRequest) -> OperationResult:
@@ -134,7 +266,9 @@ def download_motion_file(request: DownloadRequest) -> OperationResult:
         headers = create_download_headers(request.api_key)
 
         logger.info("Downloading motion file: %s", download_url)
-        response = requests.get(download_url, headers=headers, stream=True)
+        response = requests.get(
+            download_url, headers=headers, stream=True, timeout=TRANSFER_TIMEOUT
+        )
         response.raise_for_status()
 
         # Save file
@@ -371,7 +505,11 @@ def get_org_info(api_key: str, domain: str) -> OperationResult:
 
 
 def create_video_to_motion(
-    api_key: str, domain: str, video_path: str, motion_name: str
+    api_key: str,
+    domain: str,
+    video_path: str,
+    motion_name: str,
+    model: str = DEFAULT_VTM_MODEL,
 ) -> OperationResult:
     """Create a motion from a video file.
 
@@ -382,13 +520,13 @@ def create_video_to_motion(
         domain: API domain
         video_path: Path to the video file
         motion_name: Name for the created motion
+        model: Video-to-motion model name, always sent so the request does not
+            depend on the API default
 
     Returns:
         OperationResult with job_id in data if successful
     """
     import os
-
-    from .auth import create_basic_auth_header
 
     if not os.path.exists(video_path):
         return OperationResult(
@@ -399,8 +537,8 @@ def create_video_to_motion(
 
     # GraphQL multipart request for file upload
     query = """
-    mutation ($file: Upload!, $motion_name: String!) {
-        create_video_to_motion(file: $file, motion_name: $motion_name) {
+    mutation ($file: Upload!, $motion_name: String!, $model: String) {
+        create_video_to_motion(file: $file, motion_name: $motion_name, model: $model) {
             job {
                 id
                 status
@@ -413,7 +551,7 @@ def create_video_to_motion(
         # Prepare multipart form data per GraphQL multipart spec
         operations = {
             "query": query,
-            "variables": {"file": None, "motion_name": motion_name},
+            "variables": {"file": None, "motion_name": motion_name, "model": model},
         }
 
         map_data = {"0": ["variables.file"]}
@@ -421,7 +559,7 @@ def create_video_to_motion(
         import json
 
         url = f"https://{domain}/graphql"
-        headers = {"Authorization": create_basic_auth_header(api_key)}
+        headers = create_download_headers(api_key)
 
         with open(video_path, "rb") as video_file:
             files = {
@@ -431,7 +569,7 @@ def create_video_to_motion(
             }
 
             logger.info("Uploading video for motion extraction: %s", video_path)
-            response = requests.post(url, headers=headers, files=files)
+            response = requests.post(url, headers=headers, files=files, timeout=TRANSFER_TIMEOUT)
             response.raise_for_status()
 
         result = response.json()
@@ -462,6 +600,19 @@ def create_video_to_motion(
                 success=False, message="No job ID returned", error_code="NO_JOB_ID"
             )
 
+    except requests.exceptions.Timeout:
+        return OperationResult(
+            success=False,
+            message="Video upload failed: no answer from the server in time",
+            error_code="TIMEOUT",
+        )
+    except requests.exceptions.HTTPError as e:
+        # The server answered and refused, so the outcome is known.
+        return OperationResult(
+            success=False,
+            message=f"Video upload failed: {str(e)}",
+            error_code="HTTP_ERROR",
+        )
     except requests.exceptions.RequestException as e:
         return OperationResult(
             success=False,
@@ -500,7 +651,7 @@ def get_job_status(api_key: str, domain: str, job_id: str) -> OperationResult:
     variables = {"job_id": job_id}
 
     url = f"https://{domain}/graphql"
-    result = make_graphql_request(url, api_key, query, variables)
+    result = make_graphql_request(url, api_key, query, variables, timeout=JOB_STATUS_TIMEOUT)
 
     if result.success and result.data:
         job_data = result.data.get("job", {})
@@ -600,7 +751,7 @@ def create_character(
             }
 
             logger.info("Uploading character: %s", file_path)
-            response = requests.post(url, headers=headers, files=files)
+            response = requests.post(url, headers=headers, files=files, timeout=TRANSFER_TIMEOUT)
             response.raise_for_status()
 
         result = response.json()
@@ -665,7 +816,9 @@ def download_character(
 
     try:
         logger.info("Downloading character: %s", download_url)
-        response = requests.get(download_url, headers=headers, stream=True)
+        response = requests.get(
+            download_url, headers=headers, stream=True, timeout=TRANSFER_TIMEOUT
+        )
         response.raise_for_status()
 
         # Save file

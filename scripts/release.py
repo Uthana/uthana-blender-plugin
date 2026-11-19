@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 PYPROJECT_FILE = ROOT_DIR / "pyproject.toml"
 INIT_FILE = ROOT_DIR / "src" / "__init__.py"
+MANIFEST_FILE = ROOT_DIR / "src" / "blender_manifest.toml"
 SEMVER_PATTERN = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.(0|[1-9]\d*))?$"
 TAG_PATTERN = rf"^v{SEMVER_PATTERN[1:]}"
 
@@ -76,6 +77,22 @@ def read_bl_info_version() -> str:
     raise ValueError("Could not find bl_info version in src/__init__.py")
 
 
+def read_manifest_version() -> str:
+    data = tomllib.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
+    return str(data["version"])
+
+
+def write_manifest_version(base_version: str) -> None:
+    content = MANIFEST_FILE.read_text(encoding="utf-8")
+    updated = re.sub(
+        r'(?m)^version = ".*"$',
+        f'version = "{base_version}"',
+        content,
+        count=1,
+    )
+    MANIFEST_FILE.write_text(updated, encoding="utf-8")
+
+
 def write_pyproject_version(base_version: str) -> None:
     content = PYPROJECT_FILE.read_text(encoding="utf-8")
     updated = re.sub(
@@ -135,7 +152,7 @@ def ensure_tag_is_new(tag_name: str, skip_remote_check: bool) -> None:
 
 
 def maybe_commit_version_bump(tag_name: str) -> None:
-    run_git("add", str(PYPROJECT_FILE), str(INIT_FILE))
+    run_git("add", str(PYPROJECT_FILE), str(INIT_FILE), str(MANIFEST_FILE))
     staged = run_git("diff", "--cached", "--name-only").stdout.strip()
     if staged:
         run_git("commit", "-m", f"release: {tag_name}")
@@ -154,6 +171,7 @@ def command_prepare(args: argparse.Namespace) -> None:
 
     write_pyproject_version(version.base)
     write_bl_info_version(version.base)
+    write_manifest_version(version.base)
     maybe_commit_version_bump(tag_name)
     create_annotated_tag(tag_name)
 
@@ -166,7 +184,12 @@ def command_check_tag(args: argparse.Namespace) -> None:
     version = parse_tag(args.tag)
     pyproject_version = read_pyproject_version()
     bl_info_version = read_bl_info_version()
+    manifest_version = read_manifest_version()
 
+    if manifest_version != version.base:
+        raise RuntimeError(
+            f"manifest version mismatch: expected {version.base}, found {manifest_version}"
+        )
     if pyproject_version != version.base:
         raise RuntimeError(
             f"pyproject version mismatch: expected {version.base}, found {pyproject_version}"
